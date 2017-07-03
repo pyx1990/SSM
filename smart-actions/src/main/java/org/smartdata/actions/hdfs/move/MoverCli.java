@@ -20,7 +20,7 @@ package org.smartdata.actions.hdfs.move;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.sun.tools.javac.util.Log;
+//import com.sun.tools.javac.util.Log;
 import org.apache.commons.cli.ParseException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
@@ -126,7 +126,7 @@ public class MoverCli extends Configured implements Tool {
       return ExitStatus.ILLEGAL_ARGUMENTS.getExitCode();
     } finally {
       long runningTime = Time.now() - startTime;
-      Log.format("%-24s ", DateFormat.getDateTimeInstance().format(new Date()));
+      //Log.format("%-24s ", DateFormat.getDateTimeInstance().format(new Date()));
       LOG.info("Mover took " + StringUtils.formatTime(runningTime));
     }
   }
