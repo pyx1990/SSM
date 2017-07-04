@@ -19,6 +19,10 @@
       <id>cloudera</id>
       <url>https://repository.cloudera.com/artifactory/cloudera-repos/</url>
     </repository>
+    <repository>
+      <id>apache</id>
+      <url>hhttps://repo.maven.apache.org/maven2/</url>
+    </repository>
   </repositories>
 
 
