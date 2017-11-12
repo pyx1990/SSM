@@ -49,7 +49,7 @@ function NavCtrl($scope, $rootScope, $http, $routeParams, $location,
   initController();
 
   function getZeppelinVersion() {
-    $http.get(conf.restapiRoot + 'smart/api/' + conf.restapiProtocol + '/system/version').success(
+    $http.get(baseUrlSrv.getRestApiRoot() + 'smart/api/' + conf.restapiProtocol + '/system/version').success(
       function(data, status, headers, config) {
         $rootScope.zeppelinVersion = data.body;
       }).error(

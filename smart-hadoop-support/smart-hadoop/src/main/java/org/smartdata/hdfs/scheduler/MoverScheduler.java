@@ -17,18 +17,20 @@
  */
 package org.smartdata.hdfs.scheduler;
 
+import com.google.common.util.concurrent.RateLimiter;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.DFSClient;
+import org.apache.hadoop.hdfs.server.protocol.DatanodeStorageReport;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.SmartContext;
+import org.smartdata.conf.SmartConfKeys;
 import org.smartdata.hdfs.HadoopUtil;
 import org.smartdata.hdfs.action.HdfsAction;
 import org.smartdata.hdfs.action.MoveFileAction;
-import org.smartdata.hdfs.action.move.MoverStatus;
 import org.smartdata.hdfs.metric.fetcher.DatanodeStorageReportProcTask;
-import org.smartdata.hdfs.metric.fetcher.MoverProcessor;
-import org.smartdata.metastore.ActionSchedulerService;
+import org.smartdata.hdfs.metric.fetcher.MovePlanMaker;
 import org.smartdata.metastore.MetaStore;
 import org.smartdata.model.ActionInfo;
 import org.smartdata.model.LaunchAction;
@@ -37,6 +39,7 @@ import org.smartdata.model.action.ScheduleResult;
 
 import java.io.IOException;
 import java.net.URI;
+import java.security.PrivilegedExceptionAction;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -46,12 +49,14 @@ import java.util.concurrent.TimeUnit;
 
 public class MoverScheduler extends ActionSchedulerService {
   private DFSClient client;
-  private MoverStatus moverStatus;
-  private MoverProcessor processor;
-  private URI nnUri;
+  private MovePlanStatistics statistics;
+  private MovePlanMaker planMaker;
+  private final URI nnUri;
   private long dnInfoUpdateInterval = 2 * 60 * 1000;
   private ScheduledExecutorService updateService;
   private ScheduledFuture updateServiceFuture;
+  private long throttleInMb;
+  private RateLimiter rateLimiter = null;
 
   public static final Logger LOG =
       LoggerFactory.getLogger(MoverScheduler.class);
@@ -60,11 +65,17 @@ public class MoverScheduler extends ActionSchedulerService {
       throws IOException {
     super(context, metaStore);
     nnUri = HadoopUtil.getNameNodeUri(getContext().getConf());
+    throttleInMb = getContext().getConf()
+        .getLong(SmartConfKeys.SMART_ACTION_MOVE_THROTTLE_MB_KEY,
+            SmartConfKeys.SMART_ACTION_MOVE_THROTTLE_MB_DEFAULT);
+    if (throttleInMb > 0) {
+      rateLimiter = RateLimiter.create(throttleInMb);
+    }
   }
 
   public void init() throws IOException {
-    this.client = new DFSClient(nnUri, getContext().getConf());
-    moverStatus = new MoverStatus();
+    client = HadoopUtil.getDFSClient(nnUri, getContext().getConf());
+    statistics = new MovePlanStatistics();
     updateService = Executors.newScheduledThreadPool(1);
   }
 
@@ -78,7 +89,7 @@ public class MoverScheduler extends ActionSchedulerService {
     DatanodeStorageReportProcTask task =
         new DatanodeStorageReportProcTask(client, getContext().getConf());
     task.run();
-    processor = new MoverProcessor(client, task.getStorages(), task.getNetworkTopology(), moverStatus);
+    planMaker = new MovePlanMaker(client, task.getStorages(), task.getNetworkTopology(), statistics);
 
     updateServiceFuture = updateService.scheduleAtFixedRate(
         new UpdateClusterInfoTask(task),
@@ -100,6 +111,7 @@ public class MoverScheduler extends ActionSchedulerService {
     return actions;
   }
 
+  @Override
   public ScheduleResult onSchedule(ActionInfo actionInfo, LaunchAction action) {
     if (!actions.contains(action.getActionType())) {
       return ScheduleResult.SUCCESS;
@@ -124,29 +136,29 @@ public class MoverScheduler extends ActionSchedulerService {
     }
 
     try {
-      client.setStoragePolicy(file, policy);
-      FileMovePlan plan = processor.processNamespace(new Path(file));
+      FileMovePlan plan = planMaker.processNamespace(new Path(file), policy);
+      if (rateLimiter != null) {
+        // Two possible understandings here: file level and replica level
+        int len = (int)(plan.getFileLengthToMove() >> 20);
+        if (len > 0) {
+          if (!rateLimiter.tryAcquire(len)) {
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("Cancel Scheduling action {} due to throttling. {}", actionInfo, plan);
+            }
+            return ScheduleResult.RETRY;
+          }
+        }
+      }
       plan.setNamenode(nnUri);
       action.getArgs().put(MoveFileAction.MOVE_PLAN, plan.toString());
       return ScheduleResult.SUCCESS;
     } catch (IOException e) {
       LOG.error("Exception while processing " + action, e);
       return ScheduleResult.FAIL;
+    } catch (Throwable t) {
+      LOG.error("Unexpected exception when scheduling move " + policy + " '" + file + "'.", t);
+      return ScheduleResult.FAIL;
     }
-  }
-
-  public void postSchedule(ActionInfo actionInfo, ScheduleResult result) {
-  }
-
-  public void onPreDispatch(LaunchAction action) {
-  }
-
-  public boolean onSubmit(ActionInfo actionInfo) {
-    return true;
-  }
-
-  public void onActionFinished(ActionInfo actionInfo) {
-
   }
 
   private class UpdateClusterInfoTask implements Runnable {
@@ -158,8 +170,12 @@ public class MoverScheduler extends ActionSchedulerService {
 
     @Override
     public void run() {
-      task.run();
-      processor.updateClusterInfo(task.getStorages(), task.getNetworkTopology());
+      try {
+        task.run();
+        planMaker.updateClusterInfo(task.getStorages(), task.getNetworkTopology());
+      } catch (Throwable t) {
+        LOG.warn("Exception when updating cluster info ", t);
+      }
     }
   }
 }

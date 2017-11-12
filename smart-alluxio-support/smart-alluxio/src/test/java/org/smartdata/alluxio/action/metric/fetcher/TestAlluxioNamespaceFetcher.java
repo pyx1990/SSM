@@ -34,7 +34,7 @@ import org.junit.Test;
 
 import org.smartdata.alluxio.metric.fetcher.AlluxioNamespaceFetcher;
 import org.smartdata.metastore.MetaStore;
-import org.smartdata.metastore.utils.TestDaoUtil;
+import org.smartdata.metastore.TestDaoUtil;
 import org.smartdata.model.FileInfo;
 
 import java.io.IOException;
@@ -114,7 +114,7 @@ public class TestAlluxioNamespaceFetcher extends TestDaoUtil {
     FileInfo file1 = metaStore.getFile("/dir2/dir22/file221");
     assertTrue(file1 != null);
     assertFalse(file1.isdir());
-    assertEquals(1, file1.getBlock_replication());
+    assertEquals(1, file1.getBlockReplication());
     
   }
 

@@ -17,6 +17,7 @@
  */
 package org.smartdata.hdfs.action.move;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.DFSClient;
 import org.apache.hadoop.hdfs.protocol.Block;
@@ -32,6 +33,7 @@ import org.smartdata.hdfs.CompatibilityHelperLoader;
 import org.smartdata.model.action.FileMovePlan;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,6 +52,7 @@ public class MoverExecutor {
   private URI namenode;
   private String fileName;
   private NameNodeConnector nnc;
+  private DFSClient dfsClient;
   private SaslDataTransferClient saslClient;
 
   private int maxConcurrentMoves;
@@ -59,8 +62,12 @@ public class MoverExecutor {
 
   private Map<Long, Block> sourceBlockMap;
   private Map<String, DatanodeInfo> sourceDatanodeMap;
+  private MoverStatus status;
+  private List<LocatedBlock> locatedBlocks;
 
-  public MoverExecutor(Configuration conf, int maxRetryTimes, int maxConcurrentMoves) {
+  public MoverExecutor(MoverStatus status, Configuration conf,
+      int maxRetryTimes, int maxConcurrentMoves) {
+    this.status = status;
     this.conf = conf;
     this.maxRetryTimes = maxRetryTimes;
     this.maxConcurrentMoves = maxConcurrentMoves;
@@ -72,12 +79,43 @@ public class MoverExecutor {
    * @return number of failed moves
    * @throws Exception
    */
-  public int executeMove(FileMovePlan plan) throws Exception {
+  public int executeMove(FileMovePlan plan, PrintStream resultOs, PrintStream logOs) throws Exception {
+    if (plan == null) {
+      throw new RuntimeException("Schedule plan for mover is null");
+    }
+
+    init(plan);
+
+    HdfsFileStatus fileStatus = dfsClient.getFileInfo(fileName);
+    if (fileStatus == null) {
+      throw new RuntimeException("File does not exist.");
+    }
+
+    if (fileStatus.isDir()) {
+      throw new RuntimeException("File path is a directory.");
+    }
+
+    if (fileStatus.getLen() < plan.getFileLength()) {
+      throw new RuntimeException("File has been changed after this action generated.");
+    }
+
+    locatedBlocks = dfsClient.getLocatedBlocks(fileName, 0, plan.getFileLength()).getLocatedBlocks();
+
     parseSchedulePlan(plan);
 
     moveExecutor = Executors.newFixedThreadPool(maxConcurrentMoves);
+    return doMove(resultOs, logOs);
+  }
 
-    // TODO: currently just retry failed moves, may need advanced schedule
+  /**
+   * Execute a move action providing the schedule plan.
+   *
+   * @param resultOs
+   * @param logOs
+   * @return
+   * @throws Exception
+   */
+  public int doMove(PrintStream resultOs, PrintStream logOs) throws Exception {
     for (int retryTimes = 0; retryTimes < maxRetryTimes; retryTimes ++) {
       for (final ReplicaMove replicaMove : allMoves) {
         moveExecutor.execute(new Runnable() {
@@ -87,19 +125,41 @@ public class MoverExecutor {
           }
         });
       }
-      while (!ReplicaMove.allMoveFinished(allMoves)) {
-        Thread.sleep(1000);
+
+      int sleeped = 0;
+      int[] stat = new int[2];
+      while (true) {
+        ReplicaMove.countStatus(allMoves, stat);
+        if (stat[0] == allMoves.size()) {
+          status.increaseMovedBlocks(stat[1]);
+          break;
+        }
+        Thread.sleep(10);
+        sleeped += 10;
       }
+
       int remaining = ReplicaMove.refreshMoverList(allMoves);
       if (allMoves.size() == 0) {
         LOG.info("{} succeeded", this);
         return 0;
       }
+      if (logOs != null) {
+        logOs.println(String.format("The %d/%d retry, remaining = %d",
+            retryTimes + 1, maxRetryTimes, remaining));
+      }
       LOG.debug("{} : {} moves failed, start a new iteration", this, remaining);
+      if (sleeped < 1000) {
+        Thread.sleep(1000 - sleeped);
+      }
     }
     int failedMoves = ReplicaMove.failedMoves(allMoves);
     LOG.info("{} : failed with {} moves", this, failedMoves);
     return failedMoves;
+  }
+
+  @VisibleForTesting
+  public int executeMove(FileMovePlan plan) throws Exception {
+    return executeMove(plan, null, null);
   }
 
   @Override
@@ -107,18 +167,18 @@ public class MoverExecutor {
     return "MoverExecutor <" + namenode + ":" + fileName + ">";
   }
 
-  private void parseSchedulePlan(FileMovePlan plan) throws IOException {
-    if (plan == null) {
-      throw new RuntimeException("Schedule plan for mover is null");
-    }
+  private void init(FileMovePlan plan) throws IOException {
     this.namenode = plan.getNamenode();
     this.fileName = plan.getFileName();
     this.nnc = new NameNodeConnector(namenode, conf);
     this.saslClient = new SaslDataTransferClient(conf,
         DataTransferSaslUtil.getSaslPropertiesResolver(conf),
         TrustedChannelResolver.getInstance(conf), nnc.fallbackToSimpleAuth);
+    dfsClient = nnc.getDistributedFileSystem().getClient();
     allMoves = new ArrayList<>();
+  }
 
+  private void parseSchedulePlan(FileMovePlan plan) throws IOException {
     generateSourceMap();
 
     List<String> sourceUuids = plan.getSourceUuids();
@@ -135,7 +195,8 @@ public class MoverExecutor {
       DatanodeInfo sourceDatanode = sourceDatanodeMap.get(sourceUuids.get(planIndex));
       StorageGroup source = new StorageGroup(sourceDatanode, sourceStorageTypes.get(planIndex));
       //build target
-      DatanodeInfo targetDatanode = CompatibilityHelperLoader.getHelper().newDatanodeInfo(targetIpAddrs.get(planIndex), targetXferPorts.get(planIndex));
+      DatanodeInfo targetDatanode = CompatibilityHelperLoader.getHelper()
+          .newDatanodeInfo(targetIpAddrs.get(planIndex), targetXferPorts.get(planIndex));
       StorageGroup target = new StorageGroup(targetDatanode, targetStorageTypes.get(planIndex));
       // generate single move
       ReplicaMove replicaMove = new ReplicaMove(block, source, target, nnc, saslClient);
@@ -146,23 +207,11 @@ public class MoverExecutor {
   private void generateSourceMap() throws IOException {
     sourceBlockMap = new HashMap<>();
     sourceDatanodeMap = new HashMap<>();
-    DFSClient dfsClient = nnc.getDistributedFileSystem().getClient();
-    List<LocatedBlock> locatedBlocks = getLocatedBlocks(dfsClient, fileName);
     for (LocatedBlock locatedBlock : locatedBlocks) {
       sourceBlockMap.put(locatedBlock.getBlock().getBlockId(), locatedBlock.getBlock().getLocalBlock());
       for (DatanodeInfo datanodeInfo : locatedBlock.getLocations()) {
         sourceDatanodeMap.put(datanodeInfo.getDatanodeUuid(), datanodeInfo);
       }
     }
-  }
-
-  public static List<LocatedBlock> getLocatedBlocks(DFSClient dfsClient, String fileName)
-      throws IOException {
-    HdfsFileStatus fileStatus = dfsClient.getFileInfo(fileName);
-    if (fileStatus == null) {
-      throw new RuntimeException("File does not exist.");
-    }
-    long length = fileStatus.getLen();
-    return dfsClient.getLocatedBlocks(fileName, 0, length).getLocatedBlocks();
   }
 }

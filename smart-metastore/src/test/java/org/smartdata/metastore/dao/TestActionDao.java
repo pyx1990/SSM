@@ -23,10 +23,11 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
+import org.smartdata.metastore.TestDaoUtil;
 import org.smartdata.model.ActionInfo;
-import org.smartdata.metastore.utils.TestDaoUtil;
 import org.springframework.dao.EmptyResultDataAccessException;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -50,26 +51,55 @@ public class TestActionDao extends TestDaoUtil {
   }
 
   @Test
-  public void testInsertGetAction() throws Exception {
-    Map<String, String> args = new HashMap();
+  public void testGetAPageOfAction() {
+    Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
+        100);
+    ActionInfo actionInfo1 = new ActionInfo(2, 1,
+        "cache", args, "Test",
+        "Test", false, 123213213L, true, 123123L,
+        100);
+    ActionInfo actionInfo2 = new ActionInfo(3, 1,
+        "cache", args, "Test",
+        "Test", false, 123213213L, true, 123123L,
+        100);
+    ActionInfo actionInfo3 = new ActionInfo(4, 1,
+        "cache", args, "Test",
+        "Test", false, 123213213L, true, 123123L,
+        100);
+
+    actionDao.insert(new ActionInfo[]{actionInfo, actionInfo1, actionInfo2, actionInfo3});
+
+    List<String> order = new ArrayList<>();
+    order.add("aid");
+    List<Boolean> desc = new ArrayList<>();
+    desc.add(false);
+    Assert.assertTrue(actionDao.getAPageOfAction(2, 1, order, desc).get(0).equals(actionInfo2));
+  }
+
+  @Test
+  public void testInsertGetAction() throws Exception {
+    Map<String, String> args = new HashMap<>();
+    ActionInfo actionInfo = new ActionInfo(1, 1,
+        "cache", args, "Test",
+        "Test", false, 123213213L, true, 123123L,
         100);
     actionDao.insert(new ActionInfo[]{actionInfo});
-    ActionInfo dbActionInfo = actionDao.getById(1l);
+    ActionInfo dbActionInfo = actionDao.getById(1L);
     Assert.assertTrue(actionInfo.equals(dbActionInfo));
     // Get wrong id
     expectedException.expect(EmptyResultDataAccessException.class);
-    actionDao.getById(100l);
+    actionDao.getById(100L);
   }
 
   @Test
   public void testUpdateAction() throws Exception {
-    Map<String, String> args = new HashMap();
+    Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
         100);
     actionDao.insert(actionInfo);
     actionInfo.setSuccessful(true);
@@ -80,10 +110,10 @@ public class TestActionDao extends TestDaoUtil {
 
   @Test
   public void testGetNewDeleteAction() throws Exception {
-    Map<String, String> args = new HashMap();
+    Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
         100);
     List<ActionInfo> actionInfoList = actionDao.getLatestActions(0);
     // Get from empty table
@@ -93,7 +123,7 @@ public class TestActionDao extends TestDaoUtil {
     actionDao.insert(actionInfo);
     actionInfoList = actionDao.getLatestActions(0);
     Assert.assertTrue(actionInfoList.size() == 2);
-    actionInfoList = actionDao.getByIds(Arrays.asList(new Long[]{1l, 2l}));
+    actionInfoList = actionDao.getByIds(Arrays.asList(1L, 2L));
     Assert.assertTrue(actionInfoList.size() == 2);
     actionDao.delete(actionInfo.getActionId());
     actionInfoList = actionDao.getAll();
@@ -105,7 +135,7 @@ public class TestActionDao extends TestDaoUtil {
     Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
         100);
     List<ActionInfo> actionInfoList =
         actionDao.getLatestActions("cache", 0, false, true);
@@ -116,7 +146,7 @@ public class TestActionDao extends TestDaoUtil {
     actionDao.insert(actionInfo);
     actionInfoList = actionDao.getLatestActions("cache", 0, false, true);
     Assert.assertTrue(actionInfoList.size() == 2);
-    actionInfoList = actionDao.getByIds(Arrays.asList(new Long[]{1l, 2l}));
+    actionInfoList = actionDao.getByIds(Arrays.asList(1L, 2L));
     Assert.assertTrue(actionInfoList.size() == 2);
     actionInfoList = actionDao.getLatestActions("cache", 1, false, true);
     Assert.assertTrue(actionInfoList.size() == 1);
@@ -127,7 +157,7 @@ public class TestActionDao extends TestDaoUtil {
     Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
         100);
     List<ActionInfo> actionInfoList =
         actionDao.getLatestActions("cache", 0);
@@ -138,7 +168,7 @@ public class TestActionDao extends TestDaoUtil {
     actionDao.insert(actionInfo);
     actionInfoList = actionDao.getLatestActions("cache", 0, true);
     Assert.assertTrue(actionInfoList.size() == 2);
-    actionInfoList = actionDao.getByIds(Arrays.asList(new Long[]{1l, 2l}));
+    actionInfoList = actionDao.getByIds(Arrays.asList(1L, 2L));
     Assert.assertTrue(actionInfoList.size() == 2);
     actionInfoList = actionDao.getLatestActions("cache", 1, true);
     Assert.assertTrue(actionInfoList.size() == 1);
@@ -149,7 +179,7 @@ public class TestActionDao extends TestDaoUtil {
     Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
         100);
     List<ActionInfo> actionInfoList =
         actionDao.getLatestActions("cache", false, 0);
@@ -160,7 +190,7 @@ public class TestActionDao extends TestDaoUtil {
     actionDao.insert(actionInfo);
     actionInfoList = actionDao.getLatestActions("cache", false, 0);
     Assert.assertTrue(actionInfoList.size() == 2);
-    actionInfoList = actionDao.getByIds(Arrays.asList(new Long[]{1l, 2l}));
+    actionInfoList = actionDao.getByIds(Arrays.asList(1L, 2L));
     Assert.assertTrue(actionInfoList.size() == 2);
     actionInfoList = actionDao.getLatestActions("cache", false, 1);
     Assert.assertTrue(actionInfoList.size() == 1);
@@ -169,10 +199,10 @@ public class TestActionDao extends TestDaoUtil {
 
   @Test
   public void testMaxId() throws Exception {
-    Map<String, String> args = new HashMap();
+    Map<String, String> args = new HashMap<>();
     ActionInfo actionInfo = new ActionInfo(1, 1,
         "cache", args, "Test",
-        "Test", false, 123213213l, true, 123123l,
+        "Test", false, 123213213L, true, 123123L,
         100);
     Assert.assertTrue(actionDao.getMaxId() == 0);
     actionDao.insert(actionInfo);

@@ -21,12 +21,14 @@ import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DFSClient;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveEntry;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveInfo;
+import org.apache.hadoop.hdfs.protocol.CachePoolEntry;
 import org.apache.hadoop.util.Time;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.metastore.MetaStore;
 import org.smartdata.metastore.MetaStoreException;
 import org.smartdata.model.CachedFileStatus;
+import org.smartdata.model.StorageCapacity;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -143,15 +145,37 @@ public class CachedListFetcher {
         RemoteIterator<CacheDirectiveEntry> cacheDirectives =
             dfsClient.listCacheDirectives(filter);
         // Add new cache files to DB
+        //get the size of SSM cache pool
+        RemoteIterator<CachePoolEntry> cachePoolList = dfsClient.listCachePools();
+        long cacheMaxSize = 0;
+        while (cachePoolList.hasNext()) {
+          CachePoolEntry cachePoolEntry = cachePoolList.next();
+          if (cachePoolEntry.getInfo().getPoolName().equals("SSMPool")) {
+            cacheMaxSize = cachePoolEntry.getInfo().getLimit();
+          }
+        }
+        long cacheUsage = 0;
         if (!cacheDirectives.hasNext()) {
+          metaStore.insertUpdateStoragesTable(
+              new StorageCapacity("cache", cacheMaxSize, cacheMaxSize - cacheUsage));
           clearAll();
           return;
         }
         List<String> paths = new ArrayList<>();
+
         while (cacheDirectives.hasNext()) {
-          CacheDirectiveInfo currentInfo = cacheDirectives.next().getInfo();
+          CacheDirectiveEntry cacheDirectiveEntry = cacheDirectives.next();
+          CacheDirectiveInfo currentInfo = cacheDirectiveEntry.getInfo();
           paths.add(currentInfo.getPath().toString());
+          cacheUsage = cacheUsage + cacheDirectiveEntry.getStats().getBytesCached();
+          LOG.debug("File in HDFS cache: " + currentInfo.getPath().toString());
         }
+
+
+        //add cache information into metastore
+        metaStore.insertUpdateStoragesTable(
+            new StorageCapacity("cache", cacheMaxSize, cacheMaxSize - cacheUsage));
+
         // Delete all records to avoid conflict
         // metaStore.deleteAllCachedFile();
         // Insert new records into DB
@@ -160,12 +184,12 @@ public class CachedListFetcher {
           clearAll();
           return;
         }
-        for (int i = 0; i < pathFid.size(); i++) {
-          long fid = pathFid.get(paths.get(i));
+        for (String p : pathFid.keySet()) {
+          long fid = pathFid.get(p);
           newFileSet.add(fid);
           if (!fileSet.contains(fid)) {
             cachedFileStatuses.add(new CachedFileStatus(fid,
-                paths.get(i), Time.now(), Time.now(), 0));
+                p, Time.now(), Time.now(), 0));
           }
         }
         if (cachedFileStatuses.size() != 0) {

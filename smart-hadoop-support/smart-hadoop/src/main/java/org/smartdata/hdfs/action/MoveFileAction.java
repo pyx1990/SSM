@@ -22,10 +22,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.action.ActionType;
 import org.smartdata.action.Utils;
-import org.smartdata.hdfs.action.move.MoverBasedMoveRunner;
+import org.smartdata.hdfs.action.move.AbstractMoveFileAction;
+import org.smartdata.hdfs.action.move.MoverExecutor;
 import org.smartdata.hdfs.action.move.MoverStatus;
 import org.smartdata.model.action.FileMovePlan;
 
+import java.io.IOException;
 import java.util.Map;
 
 /**
@@ -59,6 +61,7 @@ public class MoveFileAction extends AbstractMoveFileAction {
       if (plan != null) {
         Gson gson = new Gson();
         movePlan = gson.fromJson(plan, FileMovePlan.class);
+        status.setTotalBlocks(movePlan.getBlockIds().size());
       }
     }
   }
@@ -73,15 +76,34 @@ public class MoveFileAction extends AbstractMoveFileAction {
       throw new IllegalArgumentException("File move plan not specified.");
     }
 
+    if (movePlan.isDir()) {
+      dfsClient.setStoragePolicy(fileName, storagePolicy);
+      appendResult("Directory moved successfully.");
+      return;
+    }
+
+    int totalReplicas = movePlan.getBlockIds().size();
     this.appendLog(
         String.format(
-            "Action starts at %s : %s -> %s",
-            Utils.getFormatedCurrentTime(), fileName, storagePolicy));
-    dfsClient.setStoragePolicy(fileName, storagePolicy);
+            "Action starts at %s : %s -> %s with %d replicas to move in total.",
+            Utils.getFormatedCurrentTime(), fileName, storagePolicy, totalReplicas));
 
-    MoverBasedMoveRunner moveRunner =
-        new MoverBasedMoveRunner(getContext().getConf(), this.status);
-    moveRunner.move(fileName, movePlan);
+    int numFailed = move();
+    if (numFailed == 0) {
+      dfsClient.setStoragePolicy(fileName, storagePolicy);
+      appendResult("All the " + totalReplicas + " replicas moved successfully.");
+    } else {
+      String res = numFailed + " of " + totalReplicas + " replicas movement failed.";
+      appendResult(res);
+      throw new IOException(res);
+    }
+  }
+
+  private int move() throws Exception {
+    int maxMoves = movePlan.getPropertyValueInt(FileMovePlan.MAX_CONCURRENT_MOVES, 10);
+    int maxRetries = movePlan.getPropertyValueInt(FileMovePlan.MAX_NUM_RETRIES, 10);
+    MoverExecutor executor = new MoverExecutor(status, getContext().getConf(), maxRetries, maxMoves);
+    return executor.executeMove(movePlan, getResultOs(), getLogOs());
   }
 
   @Override

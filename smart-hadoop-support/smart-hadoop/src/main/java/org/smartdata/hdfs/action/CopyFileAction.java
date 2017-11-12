@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.smartdata.action.ActionException;
 import org.smartdata.action.Utils;
 import org.smartdata.action.annotation.ActionSignature;
+import org.smartdata.conf.SmartConfKeys;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,7 +44,8 @@ import java.util.Map;
     actionId = "copy",
     displayName = "copy",
     usage = HdfsAction.FILE_PATH + " $src " + CopyFileAction.DEST_PATH +
-        " $dest "  + CopyFileAction.OFFSET_INDEX + " $offset" + CopyFileAction.LENGTH +
+        " $dest " + CopyFileAction.OFFSET_INDEX + " $offset" +
+        CopyFileAction.LENGTH +
         " $length" + CopyFileAction.BUF_SIZE + " $size"
 )
 public class CopyFileAction extends HdfsAction {
@@ -58,9 +60,19 @@ public class CopyFileAction extends HdfsAction {
   private long offset = 0;
   private long length = 0;
   private int bufferSize = 64 * 1024;
+  private Configuration conf;
 
   @Override
   public void init(Map<String, String> args) {
+    try {
+      this.conf = getContext().getConf();
+      String nameNodeURL =
+          this.conf.get(SmartConfKeys.SMART_DFS_NAMENODE_RPCSERVER_KEY);
+      conf.set(DFSConfigKeys.FS_DEFAULT_NAME_KEY, nameNodeURL);
+    } catch (NullPointerException e) {
+      this.conf = new Configuration();
+      appendLog("Conf error!, NameNode URL is not configured!");
+    }
     super.init(args);
     this.srcPath = args.get(FILE_PATH);
     if (args.containsKey(DEST_PATH)) {
@@ -70,10 +82,10 @@ public class CopyFileAction extends HdfsAction {
       bufferSize = Integer.valueOf(args.get(BUF_SIZE));
     }
     if (args.containsKey(OFFSET_INDEX)) {
-      offset = Integer.valueOf(args.get(OFFSET_INDEX));
+      offset = Long.valueOf(args.get(OFFSET_INDEX));
     }
     if (args.containsKey(LENGTH)) {
-      length = Integer.valueOf(args.get(LENGTH));
+      length = Long.valueOf(args.get(LENGTH));
     }
   }
 
@@ -99,30 +111,36 @@ public class CopyFileAction extends HdfsAction {
     if (length != 0) {
       copyWithOffset(srcPath, destPath, bufferSize, offset, length);
     }
+    appendLog("Copy Successfully!!");
   }
 
   private boolean copySingleFile(String src, String dest) throws IOException {
     //get The file size of source file
     long fileSize = getFileSize(src);
-    return copyWithOffset(src,dest,2048,0,fileSize);
+    appendLog(
+        String.format("Copy the whole file with length %s", fileSize));
+    return copyWithOffset(src, dest, bufferSize, 0, fileSize);
   }
 
-  private boolean copyWithOffset(String src, String dest, int bufferSize, long offset, long length) throws IOException {
+  private boolean copyWithOffset(String src, String dest, int bufferSize,
+      long offset, long length) throws IOException {
+    appendLog(
+        String.format("Copy with offset %s and length %s", offset, length));
     InputStream in = null;
     OutputStream out = null;
 
     try {
       in = getSrcInputStream(src);
-      out = getDestOutPutStream(dest);
-
+      out = getDestOutPutStream(dest, offset);
       //skip offset
       in.skip(offset);
-
       byte[] buf = new byte[bufferSize];
       long bytesRemaining = length;
 
       while (bytesRemaining > 0L) {
-        int bytesToRead = (int) (bytesRemaining < (long) buf.length ? bytesRemaining : (long) buf.length);
+        int bytesToRead =
+            (int) (bytesRemaining < (long) buf.length ? bytesRemaining :
+                (long) buf.length);
         int bytesRead = in.read(buf, 0, bytesToRead);
         if (bytesRead == -1) {
           break;
@@ -130,7 +148,6 @@ public class CopyFileAction extends HdfsAction {
         out.write(buf, 0, bytesRead);
         bytesRemaining -= (long) bytesRead;
       }
-
       return true;
     } finally {
       if (out != null) {
@@ -144,7 +161,6 @@ public class CopyFileAction extends HdfsAction {
 
   private long getFileSize(String fileName) throws IOException {
     if (fileName.startsWith("hdfs")) {
-      Configuration conf = new Configuration();
       // Get InputStream from URL
       FileSystem fs = FileSystem.get(URI.create(fileName), conf);
       return fs.getFileStatus(new Path(fileName)).getLen();
@@ -156,8 +172,6 @@ public class CopyFileAction extends HdfsAction {
   private InputStream getSrcInputStream(String src) throws IOException {
     if (src.startsWith("hdfs")) {
       // Copy between different remote clusters
-      // TODO read conf from files
-      Configuration conf = new Configuration();
       // Get InputStream from URL
       FileSystem fs = FileSystem.get(URI.create(src), conf);
       return fs.open(new Path(src));
@@ -166,32 +180,32 @@ public class CopyFileAction extends HdfsAction {
     }
   }
 
-  private OutputStream getDestOutPutStream(String dest) throws IOException {
+  private OutputStream getDestOutPutStream(String dest, long offset) throws IOException {
     if (dest.startsWith("hdfs")) {
       // Copy between different clusters
-      // TODO read conf from files
-      Configuration conf = new Configuration();
       // Get OutPutStream from URL
       FileSystem fs = FileSystem.get(URI.create(dest), conf);
+      int replication = DFSConfigKeys.DFS_REPLICATION_DEFAULT;
       try {
-        int replication = fs.getServerDefaults(new Path(dest)).getReplication();
+        replication = fs.getServerDefaults(new Path(dest)).getReplication();
         if (replication != DFSConfigKeys.DFS_REPLICATION_DEFAULT) {
-          LOG.debug("Remote Replications =" + replication);
-          conf.setInt(DFSConfigKeys.DFS_REPLICATION_KEY, replication);
-          fs = FileSystem.get(URI.create(dest), conf);
+          appendLog("Remote Replications =" + replication);
         }
       } catch (IOException e) {
         LOG.debug("Get Server default replication error!", e);
       }
-      if (fs.exists(new Path(dest))) {
+      if (fs.exists(new Path(dest)) && offset != 0) {
+        appendLog("Append to existing file " + dest);
         return fs.append(new Path(dest));
+      } else {
+        return fs.create(new Path(dest), true, (short) replication);
       }
-      return fs.create(new Path(dest), true);
+
     } else {
       // Copy between different dirs of the same cluster
-      if (dfsClient.exists(dest)) {
-        // TODO local append
-      }
+      // TODO local append
+      // if (dfsClient.exists(dest)) {
+      // }
       return dfsClient.create(dest, true);
     }
   }

@@ -27,13 +27,12 @@ import org.apache.hadoop.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.SmartContext;
+import org.smartdata.conf.SmartConfKeys;
 import org.smartdata.hdfs.metric.fetcher.CachedListFetcher;
 import org.smartdata.hdfs.metric.fetcher.DataNodeInfoFetcher;
 import org.smartdata.hdfs.metric.fetcher.InotifyEventFetcher;
 import org.smartdata.metastore.MetaStore;
-import org.smartdata.metastore.MetaStoreException;
 import org.smartdata.metastore.StatesUpdateService;
-import org.smartdata.conf.SmartConfKeys;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -72,16 +71,22 @@ public class HdfsStatesUpdateService extends StatesUpdateService {
   public void init() throws IOException {
     LOG.info("Initializing ...");
     SmartContext context = getContext();
-    HadoopUtil.loadHadoopConf(context.getConf());
-    URI nnUri = HadoopUtil.getNameNodeUri(context.getConf());
+    final Configuration conf = context.getConf();
+    String hadoopConfPath = getContext().getConf()
+        .get(SmartConfKeys.SMART_HADOOP_CONF_DIR_KEY);
+    try {
+      HadoopUtil.loadHadoopConf(context.getConf(), hadoopConfPath);
+    } catch (IOException e) {
+      throw new IOException("Fail to load Hadoop configuration for : " + e.getMessage());
+    }
+    final URI nnUri = HadoopUtil.getNameNodeUri(context.getConf());
     LOG.debug("Final Namenode URL:" + nnUri.toString());
-    this.client = new DFSClient(nnUri, context.getConf());
+    client = HadoopUtil.getDFSClient(nnUri, conf);
     moverIdOutputStream = checkAndMarkRunning(nnUri, context.getConf());
-    this.cleanFileTableContents(metaStore);
     this.executorService = Executors.newScheduledThreadPool(4);
     this.cachedListFetcher = new CachedListFetcher(client, metaStore);
     this.inotifyEventFetcher = new InotifyEventFetcher(client,
-        metaStore, executorService, new FetchFinishedCallBack());
+        metaStore, executorService, new FetchFinishedCallBack(), context.getConf());
     this.dataNodeInfoFetcher = new DataNodeInfoFetcher(
         client, metaStore, executorService, context.getConf());
     LOG.info("Initialized.");
@@ -136,14 +141,6 @@ public class HdfsStatesUpdateService extends StatesUpdateService {
       dataNodeInfoFetcher.stop();
     }
     LOG.info("Stopped.");
-  }
-
-  private void cleanFileTableContents(MetaStore adapter) throws IOException {
-    try {
-      adapter.execute("DELETE FROM file");
-    } catch (MetaStoreException e) {
-      throw new IOException("Error while 'DELETE FROM file'", e);
-    }
   }
 
   private FSDataOutputStream checkAndMarkRunning(URI namenodeURI, Configuration conf)

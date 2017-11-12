@@ -24,6 +24,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 
 import javax.sql.DataSource;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -44,14 +45,48 @@ public class RuleDao {
 
   public List<RuleInfo> getAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from rule",
+    return jdbcTemplate.query("SELECT * FROM rule",
         new RuleRowMapper());
   }
 
   public RuleInfo getById(long id) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.queryForObject("select * from rule where id = ?",
+    return jdbcTemplate.queryForObject("SELECT * FROM rule WHERE id = ?",
         new Object[]{id}, new RuleRowMapper());
+  }
+
+  public List<RuleInfo> getAPageOfRule(long start, long offset, List<String> orderBy,
+      List<Boolean> isDesc) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    boolean ifHasAid = false;
+    String sql = "SELECT * FROM rule ORDER BY ";
+
+    for (int i = 0; i < orderBy.size(); i++) {
+      if (orderBy.get(i).equals("rid")) {
+        ifHasAid = true;
+      }
+      sql = sql + orderBy.get(i);
+      if (isDesc.size() > i) {
+        if (isDesc.get(i)) {
+          sql = sql + " desc ";
+        }
+        sql = sql + ",";
+      }
+    }
+
+    if (!ifHasAid) {
+      sql = sql + "rid,";
+    }
+
+    sql = sql.substring(0, sql.length() - 1);
+    sql = sql + " LIMIT " + start + "," + offset + ";";
+    return jdbcTemplate.query(sql, new RuleRowMapper());
+  }
+
+  public List<RuleInfo> getAPageOfRule(long start, long offset) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "SELECT * FROM rule LIMIT " + start + "," + offset + ";";
+    return jdbcTemplate.query(sql, new RuleRowMapper());
   }
 
   public long insert(RuleInfo ruleInfo) {
@@ -63,36 +98,37 @@ public class RuleDao {
     return id;
   }
 
-  public int update(long ruleId, long lastCheckTime,
-      long checkedCount, int cmdletsGen) {
+  public int update(long ruleId, long lastCheckTime, long checkedCount, int cmdletsGen) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "update rule set " +
-        "last_check_time = ?, " +
-        "checked_count = ?, " +
-        "generated_cmdlets = ? where id = ?";
+    String sql =
+        "UPDATE rule SET last_check_time = ?, checked_count = ?, "
+            + "generated_cmdlets = ? WHERE id = ?";
     return jdbcTemplate.update(sql, lastCheckTime, checkedCount, cmdletsGen, ruleId);
   }
 
-  public int update(long ruleId, int rs,
-      long lastCheckTime, long checkedCount, int cmdletsGen) {
+  public int update(long ruleId, int rs, long lastCheckTime, long checkedCount, int cmdletsGen) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "update rule set " +
-        "state = ?, " +
-        "last_check_time = ?, " +
-        "checked_count = ?, " +
-        "generated_cmdlets = ? where id = ?";
+    String sql =
+        "UPDATE rule SET state = ?, last_check_time = ?, checked_count = ?, "
+            + "generated_cmdlets = ? WHERE id = ?";
     return jdbcTemplate.update(sql, rs, lastCheckTime, checkedCount, cmdletsGen, ruleId);
+  }
+
+  public int update(long ruleId, int rs) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "UPDATE rule SET state = ? WHERE id = ?";
+    return jdbcTemplate.update(sql, rs, ruleId);
   }
 
   public void delete(long id) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from rule where id = ?";
+    final String sql = "DELETE FROM rule WHERE id = ?";
     jdbcTemplate.update(sql, id);
   }
 
   public void deleteAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from rule";
+    final String sql = "DELETE FROM rule";
     jdbcTemplate.update(sql);
   }
 

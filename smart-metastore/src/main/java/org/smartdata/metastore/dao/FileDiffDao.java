@@ -17,30 +17,26 @@
  */
 package org.smartdata.metastore.dao;
 
-
 import org.apache.commons.lang.StringUtils;
-import org.smartdata.model.CmdletInfo;
 import org.smartdata.model.FileDiff;
 import org.smartdata.model.FileDiffState;
 import org.smartdata.model.FileDiffType;
-import org.smartdata.model.FileInfo;
-import org.smartdata.metastore.utils.MetaStoreUtils;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 
 import javax.sql.DataSource;
+
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class FileDiffDao {
-  private final String TABLE_NAME = "file_diff";
+  private static final String TABLE_NAME = "file_diff";
   private DataSource dataSource;
 
   public void setDataSource(DataSource dataSource) {
@@ -53,18 +49,19 @@ public class FileDiffDao {
 
   public List<FileDiff> getAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from " + TABLE_NAME, new FileDiffRowMapper());
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME, new FileDiffRowMapper());
   }
 
   public List<FileDiff> getPendingDiff() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from " + TABLE_NAME + " where state = 0", new FileDiffRowMapper());
+    return jdbcTemplate.query(
+        "SELECT * FROM " + TABLE_NAME + " WHERE state = 0", new FileDiffRowMapper());
   }
 
   public List<FileDiff> getByState(FileDiffState fileDiffState) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     return jdbcTemplate
-        .query("select * from " + TABLE_NAME + " where state = ?",
+        .query("SELECT * FROM " + TABLE_NAME + " WHERE state = ?",
             new Object[]{fileDiffState.getValue()}, new FileDiffRowMapper());
   }
 
@@ -72,29 +69,35 @@ public class FileDiffDao {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     return jdbcTemplate
         .query(
-            "select * from " + TABLE_NAME + " where src LIKE ? and state = ?",
+            "SELECT * FROM " + TABLE_NAME + " WHERE src LIKE ? and state = ?",
             new Object[]{prefix + "%", fileDiffState.getValue()},
             new FileDiffRowMapper());
   }
 
   public List<FileDiff> getPendingDiff(long rid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from " + TABLE_NAME + " WHERE did = ? and state = 0",
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME + " WHERE did = ? and state = 0",
         new Object[]{rid},
         new FileDiffRowMapper());
   }
 
   public List<FileDiff> getPendingDiff(String prefix) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME + " where src LIKE ? and state = 0",
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME + " WHERE src LIKE ? and state = 0",
         new FileDiffRowMapper(), prefix + "%");
   }
 
   public List<FileDiff> getByIds(List<Long> dids) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from " + TABLE_NAME + " WHERE did IN (?)",
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME + " WHERE did IN (?)",
         new Object[]{StringUtils.join(dids, ",")},
         new FileDiffRowMapper());
+  }
+
+  public List<FileDiff> getByFileName(String fileName) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME + " WHERE src = ?",
+        new Object[]{fileName}, new FileDiffRowMapper());
   }
 
   public List<String> getSyncPath(int size) {
@@ -102,8 +105,7 @@ public class FileDiffDao {
     if (size != 0) {
       jdbcTemplate.setMaxRows(size);
     }
-    String sql = "select DISTINCT src from " + TABLE_NAME +
-        " where state = ?";
+    String sql = "SELECT DISTINCT src FROM " + TABLE_NAME + " WHERE state = ?";
     return jdbcTemplate
         .queryForList(sql, String.class, FileDiffState.RUNNING.getValue());
   }
@@ -111,13 +113,13 @@ public class FileDiffDao {
 
   public FileDiff getById(long did) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.queryForObject("select * from " + TABLE_NAME + " where did = ?",
+    return jdbcTemplate.queryForObject("SELECT * FROM " + TABLE_NAME + " WHERE did = ?",
         new Object[]{did}, new FileDiffRowMapper());
   }
 
   public void delete(long did) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from " + TABLE_NAME + " where did = ?";
+    final String sql = "DELETE FROM " + TABLE_NAME + " WHERE did = ?";
     jdbcTemplate.update(sql, did);
   }
 
@@ -141,16 +143,51 @@ public class FileDiffDao {
     simpleJdbcInsert.executeBatch(maps);
   }
 
+  public int[] batchUpdate(
+      final List<Long> dids, final List<FileDiffState> states, final List<String> parameters) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+
+    final String sql = "UPDATE " + TABLE_NAME + " SET state = ?, "
+        + "parameters = ? WHERE did = ?";
+    return jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+      @Override
+      public void setValues(PreparedStatement ps, int i) throws SQLException {
+        ps.setShort(1, (short) states.get(i).getValue());
+        ps.setString(2, parameters.get(i));
+        ps.setLong(3, dids.get(i));
+      }
+
+      @Override
+      public int getBatchSize() {
+        return dids.size();
+      }
+    });
+  }
+
   public int update(long did, FileDiffState state) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "update " + TABLE_NAME + " set state = ? WHERE did = ?";
+    String sql = "UPDATE " + TABLE_NAME + " SET state = ? WHERE did = ?";
     return jdbcTemplate.update(sql, state.getValue(), did);
+  }
+
+  public int update(long did, String src) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "UPDATE " + TABLE_NAME + " SET src = ? WHERE did = ?";
+    return jdbcTemplate.update(sql, src, did);
+  }
+
+  public int update(long did, FileDiffState state,
+       String parameters) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "UPDATE " + TABLE_NAME + " SET state = ?, "
+        + "parameters = ? WHERE did = ?";
+    return jdbcTemplate.update(sql, state.getValue(), parameters, did);
   }
 
 
   public void deleteAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "DELETE from " + TABLE_NAME;
+    final String sql = "DELETE FROM " + TABLE_NAME;
     jdbcTemplate.execute(sql);
   }
 
@@ -163,7 +200,7 @@ public class FileDiffDao {
     parameters.put("src", fileDiff.getSrc());
     parameters.put("parameters", fileDiff.getParametersJsonString());
     parameters.put("state", fileDiff.getState().getValue());
-    parameters.put("create_time", fileDiff.getCreate_time());
+    parameters.put("create_time", fileDiff.getCreateTime());
     return parameters;
   }
 
@@ -177,7 +214,7 @@ public class FileDiffDao {
       fileDiff.setSrc(resultSet.getString("src"));
       fileDiff.setParametersFromJsonString(resultSet.getString("parameters"));
       fileDiff.setState(FileDiffState.fromValue((int) resultSet.getByte("state")));
-      fileDiff.setCreate_time(resultSet.getLong("create_time"));
+      fileDiff.setCreateTime(resultSet.getLong("create_time"));
       return fileDiff;
     }
   }

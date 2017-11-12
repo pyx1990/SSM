@@ -24,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import javax.sql.DataSource;
+
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -128,10 +129,10 @@ public class StorageDao {
     return jdbcTemplate.update(sql);
   }
 
-  public void insertStoragesTable(final StorageCapacity[] storages)
+  public void insertUpdateStoragesTable(final StorageCapacity[] storages)
       throws SQLException {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "INSERT INTO storage (type, capacity, free) VALUES (?,?,?);";
+    String sql = "REPLACE INTO storage (type, capacity, free) VALUES (?,?,?);";
     jdbcTemplate.batchUpdate(sql,
         new BatchPreparedStatementSetter() {
           public void setValues(PreparedStatement ps,
@@ -145,6 +146,13 @@ public class StorageDao {
             return storages.length;
           }
         });
+  }
+
+  public int getCountOfStorageType(String type) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "SELECT COUNT(*) FROM storage WHERE type = ?";
+
+    return jdbcTemplate.queryForObject(sql, Integer.class, type);
   }
 
   public synchronized boolean updateStoragesTable(String type

@@ -19,94 +19,47 @@
 angular.module('zeppelinWebApp')
 
   .controller('ActionsCtrl', ActionsCtrl);
-  ActionsCtrl.$inject = ['$scope', '$modal', '$sortableTableBuilder', '$dialogs', 'actions0', 'actionTypes'];
-  function ActionsCtrl($scope, $modal, $stb, $dialogs, actions0, actionTypes) {
-    'use strict';
-
-    var submitWindow = $modal({
-      templateUrl: 'app/dashboard/views/actions/submit/submit.html',
-      controller: 'ActionSubmitCtrl',
-      backdrop: 'static',
-      keyboard: true,
-      show: false,
-      resolve: {
-        actionTypes: function () {
-          return actionTypes;
-        }
+  ActionsCtrl.$inject = ['$scope', 'baseUrlSrv', '$filter', '$http', 'conf'];
+  function ActionsCtrl($scope, baseUrlSrv, $filter, $http, conf) {
+    $scope.pageNumber = 10;
+    $scope.totalNumber = 0;
+    $scope.actions;
+    $scope.currentPage = 1;
+    $scope.totalPage = 1;
+    $scope.orderby = 'aid';
+    $scope.isDesc = true;
+    function getActions() {
+      $http.get(baseUrlSrv.getSmartApiRoot() + conf.restapiProtocol + '/actions/list/'
+        + $scope.currentPage + '/' + $scope.pageNumber + '/' + $scope.orderby + '/' + $scope.isDesc)
+        .then(function(response) {
+        var actionData = angular.fromJson(response.data);
+        $scope.totalNumber = actionData.body.totalNumOfActions;
+        $scope.actions = actionData.body.actions;
+        angular.forEach($scope.actions, function (data,index) {
+          data.runTime = data.finishTime - data.createTime;
+          data.createTime = data.createTime === 0 ? "-" :
+            $filter('date')(data.createTime,'yyyy-MM-dd HH:mm:ss');
+          data.finishTime = data.finished ? data.finishTime === 0 ? "-" :
+            $filter('date')(data.finishTime,'yyyy-MM-dd HH:mm:ss') : '-';
+          data.progressColor = data.finished ? data.successful ? 'success' : 'danger' : 'warning';
+        });
+        $scope.totalPage = Math.ceil($scope.totalNumber / $scope.pageNumber);
+      }, function(errorResponse) {
+          $scope.totalNumber = 0;
+      });
+    };
+    $scope.gotoPage = function (index) {
+      $scope.currentPage = index;
+      getActions();
+    };
+    $scope.defindOrderBy = function (filed) {
+      if ($scope.orderby === filed) {
+        $scope.isDesc = ! $scope.isDesc;
+      } else {
+        $scope.orderby = filed;
+        $scope.isDesc = true;
       }
-    });
-
-    $scope.openSubmitActionDialog = function () {
-      submitWindow.$promise.then(submitWindow.show);
+      getActions();
     };
-
-    $scope.actionsTable = {
-      cols: [
-        // group 1/3 (4-col)
-        $stb.indicator().key('state').canSort('state.condition+"_"+createTime').styleClass('td-no-padding').done(),
-        $stb.text('ID').key('id').canSort().sortDefaultDescent().done(),
-        $stb.text('Cmdlet ID').key('cid').canSort().done(),
-        $stb.text('Name').key(['actionName']).canSort().done(),
-          // $stb.link('Name').key('name').canSort('name.text').styleClass('col-md-1').done(),
-        // group 2/3 (5-col)
-        $stb.datetime('Create Time').key('createTime').canSort().done(),
-        $stb.datetime('Finish Time').key('finishTime').canSort().done(),
-        $stb.duration("Running Time").key('runningTime').canSort().done(),
-
-          // $stb.datetime('Start Time').key('startTime').canSort().styleClass('col-md-1 hidden-sm hidden-xs').done(),
-        // $stb.datetime('Stop Time').key('stopTime').canSort().styleClass('col-md-1 hidden-sm hidden-xs').done(),
-        // $stb.text('User').key('user').canSort().styleClass('col-md-2').done(),
-        // group 3/3 (4-col)
-        $stb.text('Succeed').key('succeed').canSort().styleClass('col-md-1 hidden-sm hidden-xs').done(),
-        $stb.progressbar('Progress').key('progress').sortBy('progress.usage').styleClass('col-md-1').done(),
-        $stb.button('Actions').key(['view']).styleClass('col-md-1').done()
-      ],
-      rows: null
-    };
-
-    function updateTable(actions) {
-      $scope.actionsTable.rows = $stb.$update($scope.actionsTable.rows,
-        _.map(actions, function (action) {
-          return {
-            id: action.actionId,
-            cid: action.cmdletId,
-            // name: {href: pageUrl, text: rule.appName},
-            state: {tooltip: action.status, condition: action.finished ? '' : 'good', shape: 'stripe'},
-            //user: rule.user,
-            actionName: {
-              title: "ID:" + action.actionId + " Cmdlet ID:" + action.cmdletId + " Name:" + action.actionName
-              + " Create Time:" + new Date(action.createTime).toUTCString()
-              + " Finish Time:" + new Date(action.finished ? action.finishTime : "-").toUTCString()
-              + " Running Time:" + action.uptime + "ms"
-              + " Succeed:" + (action.finished ? action.successful : "-"),
-              value: action.actionName
-            },
-            createTime: action.createTime,
-            finishTime: action.finished ? action.finishTime : "-",
-            runningTime: action.uptime,
-            // startTime: rule.startTime,
-            // stopTime: rule.finishTime || '-',
-            succeed: action.finished ? action.successful : "-",
-            view: {
-              href: action.pageUrl,
-              icon: function() {
-                return 'glyphicon glyphicon-info-sign';
-              },
-              class: 'btn-xs btn-info'
-            },
-            progress: {
-                current: action.progress,
-                max: 1,
-                flag: action.finished ? action.successful : "-"
-                // usage: action.progress * 100
-            }
-          };
-        }));
-    }
-
-    updateTable(actions0.$data());
-    actions0.$subscribe($scope, function (actions) {
-      updateTable(actions);
-    });
+    getActions();
   }
-

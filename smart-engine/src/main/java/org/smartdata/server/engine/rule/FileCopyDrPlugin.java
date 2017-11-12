@@ -17,9 +17,6 @@
  */
 package org.smartdata.server.engine.rule;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.action.SyncAction;
@@ -28,16 +25,12 @@ import org.smartdata.metastore.MetaStoreException;
 import org.smartdata.model.BackUpInfo;
 import org.smartdata.model.CmdletDescriptor;
 import org.smartdata.model.FileDiff;
-import org.smartdata.model.FileDiffState;
 import org.smartdata.model.FileDiffType;
-import org.smartdata.model.FileInfo;
 import org.smartdata.model.RuleInfo;
 import org.smartdata.model.rule.RuleExecutorPlugin;
 import org.smartdata.model.rule.TranslateResult;
 import org.smartdata.utils.StringUtil;
 
-import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -78,6 +71,7 @@ public class FileCopyDrPlugin implements RuleExecutorPlugin {
         String dest = des.getActionArgs(i).get(SyncAction.DEST);
         if (!dest.endsWith("/")) {
           dest += "/";
+          des.addActionArg(i, SyncAction.DEST, dest);
         }
         backUpInfo.setDest(dest);
         backUpInfo.setPeriod(tResult.getTbScheduleInfo().getEvery());
@@ -95,9 +89,12 @@ public class FileCopyDrPlugin implements RuleExecutorPlugin {
         List<BackUpInfo> infos = backups.get(ruleId);
         synchronized (infos) {
           try {
-            // Trigger forceSync
-            forceSync(dirs, dest);
-            metaStore.deleteBackUpInfoById(ruleId);
+            metaStore.deleteBackUpInfo(ruleId);
+            // Add base Sync tag
+            FileDiff fileDiff = new FileDiff(FileDiffType.BASESYNC);
+            fileDiff.setSrc(backUpInfo.getSrc());
+            fileDiff.getParameters().put("-dest", backUpInfo.getDest());
+            metaStore.insertFileDiff(fileDiff);
             metaStore.insertBackUpInfo(backUpInfo);
             infos.add(backUpInfo);
           } catch (MetaStoreException e) {
@@ -108,52 +105,6 @@ public class FileCopyDrPlugin implements RuleExecutorPlugin {
       }
     }
   }
-
-  private void forceSync(String src, String dest) throws MetaStoreException {
-    List<FileInfo> srcFiles = metaStore.getFilesByPrefix(src);
-    for (FileInfo fileInfo : srcFiles) {
-      if (fileInfo.isdir()) {
-        // Ignore directory
-        continue;
-      }
-      String fullPath = fileInfo.getPath();
-      String remotePath = fullPath.replace(src, dest);
-      long offSet = fileCompare(fileInfo, remotePath);
-      if (offSet >= fileInfo.getLength()) {
-        LOG.debug("Primary len={}, remote len={}", fileInfo.getLength(), offSet);
-        continue;
-      }
-      FileDiff fileDiff = new FileDiff(FileDiffType.APPEND, FileDiffState.PENDING);
-      fileDiff.setSrc(fullPath);
-      // Append changes to remote files
-      fileDiff.getParameters().put("-length", String.valueOf(fileInfo.getLength() - offSet));
-      fileDiff.getParameters().put("-offset", String.valueOf(offSet));
-      fileDiff.setRuleId(-1);
-      metaStore.insertFileDiff(fileDiff);
-    }
-  }
-
-  private long fileCompare(FileInfo fileInfo, String dest) throws MetaStoreException {
-    // Primary
-    long localLen = fileInfo.getLength();
-    // TODO configuration
-    Configuration conf = new Configuration();
-    // Get InputStream from URL
-    FileSystem fs = null;
-    try {
-      fs = FileSystem.get(URI.create(dest), conf);
-      long remoteLen = fs.getFileStatus(new Path(dest)).getLen();
-      // Remote
-      if (localLen == remoteLen) {
-        return localLen;
-      } else {
-        return remoteLen;
-      }
-    } catch (IOException e) {
-      return 0;
-    }
-  }
-
 
   private List<String> getPathMatchesList(List<String> paths) {
     List<String> ret = new ArrayList<>();
@@ -169,7 +120,7 @@ public class FileCopyDrPlugin implements RuleExecutorPlugin {
 
   private String referenceNonExists(TranslateResult tr, List<String> dirs) {
     String temp = "SELECT src FROM file_diff WHERE "
-        + "state = 1 AND diff_type IN (1,2) AND (%s);";
+        + "state = 0 AND diff_type IN (1,2) AND (%s);";
     String srcs = "src LIKE '" + dirs.get(0) + "%'";
     for (int i = 1; i < dirs.size(); i++) {
       srcs +=  " OR src LIKE '" + dirs.get(i) + "%'";
@@ -185,8 +136,8 @@ public class FileCopyDrPlugin implements RuleExecutorPlugin {
     return objects;
   }
 
-  public CmdletDescriptor preSubmitCmdletDescriptor(final RuleInfo ruleInfo, TranslateResult tResult,
-      CmdletDescriptor descriptor) {
+  public CmdletDescriptor preSubmitCmdletDescriptor(
+      final RuleInfo ruleInfo, TranslateResult tResult, CmdletDescriptor descriptor) {
     return descriptor;
   }
 
@@ -204,7 +155,7 @@ public class FileCopyDrPlugin implements RuleExecutorPlugin {
 
         if (infos.size() == 0) {
           backups.remove(ruleId);
-          metaStore.deleteBackUpInfoById(ruleId);
+          metaStore.deleteBackUpInfo(ruleId);
         }
       } catch (MetaStoreException e) {
         LOG.error("Remove backup info error:" + ruleInfo, e);

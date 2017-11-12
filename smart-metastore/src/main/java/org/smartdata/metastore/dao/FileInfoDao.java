@@ -17,8 +17,8 @@
  */
 package org.smartdata.metastore.dao;
 
-import org.smartdata.model.FileInfo;
 import org.smartdata.metastore.utils.MetaStoreUtils;
+import org.smartdata.model.FileInfo;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -26,6 +26,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 
 import javax.sql.DataSource;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
@@ -63,7 +64,7 @@ public class FileInfoDao {
 
   public List<FileInfo> getFilesByPrefix(String path) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("SELECT * FROM file where path LIKE ?",
+    return jdbcTemplate.query("SELECT * FROM file WHERE path LIKE ?",
         new FileInfoDao.FileInfoRowMapper(), path + "%");
   }
 
@@ -123,7 +124,7 @@ public class FileInfoDao {
     simpleJdbcInsert.setTableName("file");
     Map<String, Object>[] maps = new Map[fileInfos.length];
     for (int i = 0; i < fileInfos.length; i++) {
-      maps[i] = toMap(fileInfos[i],mapOwnerIdName,mapGroupIdName);
+      maps[i] = toMap(fileInfos[i], mapOwnerIdName, mapGroupIdName);
     }
     simpleJdbcInsert.executeBatch(maps);
   }
@@ -136,13 +137,13 @@ public class FileInfoDao {
 
   public void deleteById(long fid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from file where fid = ?";
+    final String sql = "DELETE FROM file WHERE fid = ?";
     jdbcTemplate.update(sql, fid);
   }
 
   public void deleteAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "DELETE from file";
+    final String sql = "DELETE FROM file";
     jdbcTemplate.execute(sql);
   }
 
@@ -153,10 +154,10 @@ public class FileInfoDao {
     parameters.put("path", fileInfo.getPath());
     parameters.put("fid", fileInfo.getFileId());
     parameters.put("length", fileInfo.getLength());
-    parameters.put("block_replication", fileInfo.getBlock_replication());
+    parameters.put("block_replication", fileInfo.getBlockReplication());
     parameters.put("block_size", fileInfo.getBlocksize());
-    parameters.put("modification_time", fileInfo.getModification_time());
-    parameters.put("access_time", fileInfo.getAccess_time());
+    parameters.put("modification_time", fileInfo.getModificationTime());
+    parameters.put("access_time", fileInfo.getAccessTime());
     parameters.put("is_dir", fileInfo.isdir());
     parameters.put("sid", fileInfo.getStoragePolicy());
     parameters

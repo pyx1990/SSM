@@ -20,8 +20,6 @@ package org.smartdata.server.engine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.AbstractService;
-import org.smartdata.model.CachedFileStatus;
-import org.smartdata.model.FileAccessInfo;
 import org.smartdata.conf.Reconfigurable;
 import org.smartdata.conf.ReconfigurableRegistry;
 import org.smartdata.conf.ReconfigureException;
@@ -32,17 +30,23 @@ import org.smartdata.metastore.dao.AccessCountTableManager;
 import org.smartdata.metrics.FileAccessEvent;
 import org.smartdata.metrics.FileAccessEventSource;
 import org.smartdata.metrics.impl.MetricsFactory;
+import org.smartdata.model.CachedFileStatus;
+import org.smartdata.model.FileAccessInfo;
 import org.smartdata.model.FileInfo;
+import org.smartdata.model.StorageCapacity;
+import org.smartdata.model.Utilization;
 import org.smartdata.server.engine.data.AccessEventFetcher;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
- * Polls metrics and events from NameNode
+ * Polls metrics and events from NameNode.
  */
 public class StatesManager extends AbstractService implements Reconfigurable {
   private ServerContext serverContext;
@@ -53,6 +57,7 @@ public class StatesManager extends AbstractService implements Reconfigurable {
   private FileAccessEventSource fileAccessEventSource;
   private AbstractService statesUpdaterService;
   private volatile boolean working = false;
+  private List<String> ignoreDirs = new ArrayList<String>();
 
   public static final Logger LOG = LoggerFactory.getLogger(StatesManager.class);
 
@@ -82,6 +87,15 @@ public class StatesManager extends AbstractService implements Reconfigurable {
     if (statesUpdaterService == null) {
       ReconfigurableRegistry.registReconfigurableProperty(
           getReconfigurableProperties(), this);
+    }
+
+    Collection<String> dirs = serverContext.getConf()
+        .getTrimmedStringCollection(SmartConfKeys.SMART_IGNORE_DIRS_KEY);
+    for (String s : dirs) {
+      if (!s.endsWith("/")) {
+        s = s + "/";
+        ignoreDirs.add(s);
+      }
     }
     LOG.info("Initialized.");
   }
@@ -134,6 +148,13 @@ public class StatesManager extends AbstractService implements Reconfigurable {
   }
 
   public void reportFileAccessEvent(FileAccessEvent event) throws IOException {
+    String path = event.getPath();
+    path = path + (path.endsWith("/") ? "" : "/");
+    for (String s : ignoreDirs) {
+      if (path.startsWith(s)) {
+        return;
+      }
+    }
     event.setTimeStamp(System.currentTimeMillis());
     this.fileAccessEventSource.insertEventFromSmartClient(event);
   }
@@ -150,6 +171,24 @@ public class StatesManager extends AbstractService implements Reconfigurable {
   public List<CachedFileStatus> getCachedFileStatus() throws IOException {
     try {
       return serverContext.getMetaStore().getCachedFileStatus();
+    } catch (MetaStoreException e) {
+      throw new IOException(e);
+    }
+  }
+
+  public Utilization getStorageUtilization(String resourceName) throws IOException {
+    try {
+      if (!resourceName.equals("cache")) {
+        long capacity =
+            serverContext.getMetaStore().getStoreCapacityOfDifferentStorageType(resourceName);
+        long free = serverContext.getMetaStore().getStoreFreeOfDifferentStorageType(resourceName);
+        return new Utilization(capacity, capacity - free);
+      } else {
+        StorageCapacity storageCapacity = serverContext.getMetaStore().getStorageCapacity("cache");
+        return new Utilization(
+            storageCapacity.getCapacity(),
+            storageCapacity.getCapacity() - storageCapacity.getFree());
+      }
     } catch (MetaStoreException e) {
       throw new IOException(e);
     }
@@ -186,22 +225,26 @@ public class StatesManager extends AbstractService implements Reconfigurable {
 
   private synchronized void initStatesUpdaterService() {
     try {
-      statesUpdaterService = AbstractServiceFactory
-          .createStatesUpdaterService(getContext().getConf(),
-              serverContext, serverContext.getMetaStore());
-      statesUpdaterService.init();
-    } catch (IOException e) {
-      statesUpdaterService = null;
-      LOG.info("Failed to create states updater service for: " + e.getMessage());
-    }
-
-    if (working) {
       try {
-        statesUpdaterService.start();
+        statesUpdaterService = AbstractServiceFactory
+            .createStatesUpdaterService(getContext().getConf(),
+                serverContext, serverContext.getMetaStore());
+        statesUpdaterService.init();
       } catch (IOException e) {
-        LOG.info("Failed to start states updater service.");
         statesUpdaterService = null;
+        LOG.info("Failed to create states updater service for: " + e.getMessage());
       }
+
+      if (working) {
+        try {
+          statesUpdaterService.start();
+        } catch (IOException e) {
+          LOG.info("Failed to start states updater service.");
+          statesUpdaterService = null;
+        }
+      }
+    } catch (Throwable t) {
+      LOG.info("", t);
     }
   }
 }

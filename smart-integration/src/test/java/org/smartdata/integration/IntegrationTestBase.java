@@ -30,9 +30,9 @@ import org.smartdata.integration.cluster.SmartMiniCluster;
  */
 public class IntegrationTestBase {
 
-  private static SmartCluster cluster;
-  private static SmartConf conf;
-  private static IntegrationSmartServer smartServer;
+  protected static SmartCluster cluster;
+  protected static SmartConf conf;
+  protected static IntegrationSmartServer smartServer;
   private static int zeppelinPort;
 
   @BeforeClass
@@ -53,7 +53,7 @@ public class IntegrationTestBase {
     String httpAddr = conf.get(SmartConfKeys.SMART_SERVER_HTTP_ADDRESS_KEY,
         SmartConfKeys.SMART_SERVER_HTTP_ADDRESS_DEFAULT);
     zeppelinPort = Integer.parseInt(httpAddr.split(":")[1]);
-    conf.setBoolean(SmartConfKeys.SMART_ENABLE_ZEPPELIN, true);
+    conf.setBoolean(SmartConfKeys.SMART_ENABLE_ZEPPELIN_WEB, false);
     smartServer = new IntegrationSmartServer();
     smartServer.setUp(conf);
 

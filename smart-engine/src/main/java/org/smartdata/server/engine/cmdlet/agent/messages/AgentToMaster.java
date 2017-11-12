@@ -22,7 +22,7 @@ import org.smartdata.server.engine.cmdlet.agent.AgentMaster;
 import java.io.Serializable;
 
 /**
- * Messages sent from {@link SmartAgent} to {@link AgentMaster}
+ * Messages sent from {@link SmartAgent} to {@link AgentMaster}.
  */
 public class AgentToMaster {
 
@@ -53,8 +53,12 @@ public class AgentToMaster {
 
     @Override
     public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
 
       RegisterAgent that = (RegisterAgent) o;
 
@@ -68,9 +72,24 @@ public class AgentToMaster {
 
     @Override
     public String toString() {
-      return "RegisterAgent{" +
-          "id=" + id +
-          '}';
+      return "RegisterAgent{ id=" + id + "}";
+    }
+  }
+
+  public static class ServeReady implements Serializable{
+    private static final long serialVersionUID = 6888516209100011658L;
+  }
+
+  public static class AlreadyLaunchedTikv implements Serializable {
+    private static final long serialVersionUID = 7129253373711332715L;
+    private final MasterToAgent.AgentId id;
+
+    public AlreadyLaunchedTikv(MasterToAgent.AgentId id) {
+      this.id = id;
+    }
+
+    public String toString() {
+      return "Agent" + "[" + id.toString() + "]" + " already launched Tikv.";
     }
   }
 }

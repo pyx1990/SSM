@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,26 +30,28 @@ import com.typesafe.config.ConfigFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.conf.SmartConf;
-import org.smartdata.conf.SmartConfKeys;
+import org.smartdata.protocol.message.StatusMessage;
+import org.smartdata.server.engine.CmdletManager;
+import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.AlreadyLaunchedTikv;
 import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.RegisterAgent;
 import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.RegisterNewAgent;
+import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.ServeReady;
 import org.smartdata.server.engine.cmdlet.agent.messages.MasterToAgent.AgentId;
 import org.smartdata.server.engine.cmdlet.agent.messages.MasterToAgent.AgentRegistered;
-import org.smartdata.server.engine.CmdletManager;
+import org.smartdata.server.engine.cmdlet.agent.messages.MasterToAgent.ReadyToLaunchTikv;
 import org.smartdata.server.engine.cmdlet.message.LaunchCmdlet;
-import org.smartdata.protocol.message.StatusMessage;
 import org.smartdata.server.engine.cmdlet.message.StopCmdlet;
-import scala.concurrent.Await;
-import scala.concurrent.Future;
-import scala.concurrent.duration.Duration;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import scala.concurrent.Await;
+import scala.concurrent.Future;
+import scala.concurrent.duration.Duration;
 
 public class AgentMaster {
 
@@ -60,30 +62,71 @@ public class AgentMaster {
   private ActorRef master;
   private AgentManager agentManager;
 
-  public AgentMaster(CmdletManager statusUpdater) {
-    this(new SmartConf(), statusUpdater);
-  }
+  private static CmdletManager statusUpdater;
+  private static int tikvNumber = 0;
+  private static int serveReadyAgent = 0;
+  private static AgentMaster agentMaster = null;
 
-  public AgentMaster(SmartConf conf, CmdletManager statusUpdater) {
-    String address = conf.get(SmartConfKeys.SMART_AGENT_MASTER_ADDRESS_KEY);
-    checkNotNull(address);
+  private AgentMaster(SmartConf conf) throws IOException {
+    String[] addresses = AgentUtils.getMasterAddress(conf);
+    if (addresses == null) {
+      throw new IOException("AgentMaster address not configured!");
+    }
+    String address = addresses[0];
+    LOG.info("Agent master: " + address);
     Config config = AgentUtils.overrideRemoteAddress(
         ConfigFactory.load(AgentConstants.AKKA_CONF_FILE), address);
     this.agentManager = new AgentManager();
-    Props props = Props.create(MasterActor.class, statusUpdater, agentManager);
+    Props props = Props.create(MasterActor.class, null, agentManager);
     ActorSystemLauncher launcher = new ActorSystemLauncher(config, props);
     launcher.start();
+  }
+
+  public static AgentMaster getAgentMaster() throws IOException {
+    return getAgentMaster(new SmartConf());
+  }
+
+  public static AgentMaster getAgentMaster(SmartConf conf) throws IOException {
+    if (agentMaster == null) {
+      agentMaster = new AgentMaster(conf);
+      return agentMaster;
+    } else {
+      return agentMaster;
+    }
+  }
+
+  public boolean isAgentRegisterReady(SmartConf conf) {
+    //TODO: how many agents are required to launch tikv
+    return serveReadyAgent == conf.getAgentsNumber();
+  }
+
+  public boolean isTikvAlreadyLaunched(SmartConf conf) {
+    //TODO: how many tikvs are required
+    return tikvNumber == conf.getAgentsNumber();
+  }
+
+  public void sendLaunchTikvMessage() {
+    for (ActorRef agent : agentManager.getAgents().keySet()) {
+      agent.tell(new ReadyToLaunchTikv(), master);
+      LOG.info("Try to launch Tikv on " + agent.path().address().host().get());
+    }
+  }
+
+  public static void setCmdletManager(CmdletManager statusUpdater) {
+    AgentMaster.statusUpdater = statusUpdater;
   }
 
   public boolean canAcceptMore() {
     return agentManager.hasFreeAgent();
   }
 
-  public void launchCmdlet(LaunchCmdlet launch) {
+  public String launchCmdlet(LaunchCmdlet launch) {
     try {
-      askMaster(launch);
+      AgentId agentId = (AgentId) askMaster(launch);
+      return String.valueOf(agentId.getId());
     } catch (Exception e) {
       LOG.error("Failed to launch Cmdlet {} due to {}", launch, e.getMessage());
+      return null;
     }
   }
 
@@ -111,9 +154,13 @@ public class AgentMaster {
     List<AgentInfo> infos = new ArrayList<>();
     for (Map.Entry<ActorRef, AgentId> entry : agentManager.getAgents().entrySet()) {
       String location = AgentUtils.getHostPort(entry.getKey());
-      infos.add(new AgentInfo(entry.getValue().getId(), location));
+      infos.add(new AgentInfo(String.valueOf(entry.getValue().getId()), location));
     }
     return infos;
+  }
+
+  public int getNumAgents() {
+    return agentManager.getAgents().size();
   }
 
   @VisibleForTesting
@@ -158,25 +205,29 @@ public class AgentMaster {
     }
   }
 
+
   static class MasterActor extends UntypedActor {
-
-
     private final Map<Long, ActorRef> dispatches = new HashMap<>();
     private int nextAgentId = 0;
-
-    private CmdletManager statusUpdater;
     private AgentManager agentManager;
 
     public MasterActor(CmdletManager statusUpdater, AgentManager agentManager) {
-      this.statusUpdater = statusUpdater;
+      this(agentManager);
+      if (statusUpdater != null) {
+        setCmdletManager(statusUpdater);
+      }
+    }
+
+    public MasterActor(AgentManager agentManager) {
       this.agentManager = agentManager;
     }
 
     @Override
     public void onReceive(Object message) throws Exception {
-      Boolean handled = handleAgentMessage(message) ||
-          handleClientMessage(message) ||
-          handleTerminatedMessage(message);
+      Boolean handled =
+          handleAgentMessage(message)
+              || handleClientMessage(message)
+              || handleTerminatedMessage(message);
       if (!handled) {
         unhandled(message);
       }
@@ -199,7 +250,14 @@ public class AgentMaster {
         LOG.info("Register SmartAgent {} from {}", id, agent);
         return true;
       } else if (message instanceof StatusMessage) {
-        this.statusUpdater.updateStatus((StatusMessage) message);
+        AgentMaster.statusUpdater.updateStatus((StatusMessage) message);
+        return true;
+      } else if (message instanceof ServeReady) {
+        AgentMaster.serveReadyAgent++;
+        return true;
+      } else if (message instanceof AlreadyLaunchedTikv) {
+        LOG.info(message.toString());
+        AgentMaster.tikvNumber++;
         return true;
       } else {
         return false;
@@ -211,9 +269,10 @@ public class AgentMaster {
         if (agentManager.hasFreeAgent()) {
           LaunchCmdlet launch = (LaunchCmdlet) message;
           ActorRef agent = this.agentManager.dispatch();
+          AgentId agentId = this.agentManager.getAgentId(agent);
           agent.tell(launch, getSelf());
           dispatches.put(launch.getCmdletId(), agent);
-          getSender().tell("Succeed", getSelf());
+          getSender().tell(agentId, getSelf());
         }
         return true;
       } else if (message instanceof StopCmdlet) {
@@ -237,39 +296,5 @@ public class AgentMaster {
         return false;
       }
     }
-
   }
-
-  static class AgentManager {
-
-    private final Map<ActorRef, AgentId> agents = new HashMap<>();
-    private List<ActorRef> resources = new ArrayList<>();
-    private int dispatchIndex = 0;
-
-    void addAgent(ActorRef agent, AgentId id) {
-      agents.put(agent, id);
-      resources.add(agent);
-    }
-
-    AgentId removeAgent(ActorRef agent) {
-      AgentId id = agents.remove(agent);
-      resources.remove(agent);
-      return id;
-    }
-
-    boolean hasFreeAgent() {
-      return !resources.isEmpty();
-    }
-
-    ActorRef dispatch() {
-      int id = dispatchIndex % resources.size();
-      dispatchIndex = (id + 1) % resources.size();
-      return resources.get(id);
-    }
-
-    Map<ActorRef, AgentId> getAgents() {
-      return agents;
-    }
-  }
-
 }

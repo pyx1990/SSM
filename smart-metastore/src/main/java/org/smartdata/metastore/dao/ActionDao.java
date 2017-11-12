@@ -27,6 +27,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 
 import javax.sql.DataSource;
+
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -36,7 +37,7 @@ import java.util.Map;
 
 public class ActionDao {
 
-  private String TABLE_NAME = "action";
+  private static final String TABLE_NAME = "action";
   private DataSource dataSource;
 
   public void setDataSource(DataSource dataSource) {
@@ -49,15 +50,22 @@ public class ActionDao {
 
   public List<ActionInfo> getAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from " + TABLE_NAME,
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME,
         new ActionRowMapper());
+  }
+
+  public Long getCountOfAction() {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "SELECT COUNT(*) FROM " + TABLE_NAME;
+    return jdbcTemplate.queryForObject(sql, Long.class);
   }
 
   public ActionInfo getById(long aid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.queryForObject("select * from " +
-            TABLE_NAME + " where aid = ?",
-        new Object[]{aid}, new ActionRowMapper());
+    return jdbcTemplate.queryForObject(
+        "SELECT * FROM " + TABLE_NAME + " WHERE aid = ?",
+        new Object[] {aid},
+        new ActionRowMapper());
   }
 
   public List<ActionInfo> getByIds(List<Long> aids) {
@@ -65,16 +73,18 @@ public class ActionDao {
         new NamedParameterJdbcTemplate(dataSource);
     MapSqlParameterSource parameterSource = new MapSqlParameterSource();
     parameterSource.addValue("aids", aids);
-    return namedParameterJdbcTemplate.query("select * from " +
-            TABLE_NAME + " WHERE aid IN (:aids)",
-        parameterSource, new ActionRowMapper());
+    return namedParameterJdbcTemplate.query(
+        "SELECT * FROM " + TABLE_NAME + " WHERE aid IN (:aids)",
+        parameterSource,
+        new ActionRowMapper());
   }
 
   public List<ActionInfo> getByCid(long cid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from " +
-            TABLE_NAME + " where cid = ?",
-        new Object[]{cid}, new ActionRowMapper());
+    return jdbcTemplate.query(
+        "SELECT * FROM " + TABLE_NAME + " WHERE cid = ?",
+        new Object[] {cid},
+        new ActionRowMapper());
   }
 
   public List<ActionInfo> getByCondition(String aidCondition,
@@ -98,7 +108,7 @@ public class ActionDao {
     if (size != 0) {
       jdbcTemplate.setMaxRows(size);
     }
-    String sql = "select * from " + TABLE_NAME + " ORDER by aid DESC";
+    String sql = "SELECT * FROM " + TABLE_NAME + " ORDER BY aid DESC";
     return jdbcTemplate.query(sql, new ActionRowMapper());
   }
 
@@ -107,8 +117,7 @@ public class ActionDao {
     if (size != 0) {
       jdbcTemplate.setMaxRows(size);
     }
-    String sql = "select * from " + TABLE_NAME +
-        " where action_name = ? ORDER by aid DESC";
+    String sql = "SELECT * FROM " + TABLE_NAME + " WHERE action_name = ? ORDER BY aid DESC";
     return jdbcTemplate.query(sql, new ActionRowMapper(), actionName);
   }
 
@@ -118,10 +127,11 @@ public class ActionDao {
     if (size != 0) {
       jdbcTemplate.setMaxRows(size);
     }
-    String sql = "select * from " + TABLE_NAME +
-        " where action_name = ? and successful = ? and finished = ? ORDER by aid DESC";
-    return jdbcTemplate
-        .query(sql, new ActionRowMapper(), actionName, successful, finished);
+    String sql =
+        "SELECT * FROM "
+            + TABLE_NAME
+            + " WHERE action_name = ? AND successful = ? AND finished = ? ORDER BY aid DESC";
+    return jdbcTemplate.query(sql, new ActionRowMapper(), actionName, successful, finished);
   }
 
   public List<ActionInfo> getLatestActions(String actionName, boolean successful,
@@ -130,10 +140,47 @@ public class ActionDao {
     if (size != 0) {
       jdbcTemplate.setMaxRows(size);
     }
-    String sql = "select * from " + TABLE_NAME +
-        " where action_name = ? and successful = ? ORDER by aid DESC";
-    return jdbcTemplate
-        .query(sql, new ActionRowMapper(), actionName, successful);
+    String sql =
+        "SELECT * FROM "
+            + TABLE_NAME
+            + " WHERE action_name = ? AND successful = ? ORDER BY aid DESC";
+    return jdbcTemplate.query(sql, new ActionRowMapper(), actionName, successful);
+  }
+
+  public List<ActionInfo> getAPageOfAction(long start, long offset, List<String> orderBy,
+      List<Boolean> isDesc) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    boolean ifHasAid = false;
+    String sql = "SELECT * FROM " + TABLE_NAME + " ORDER BY ";
+
+    for (int i = 0; i < orderBy.size(); i++) {
+      if (orderBy.get(i).equals("aid")) {
+        ifHasAid = true;
+      }
+      sql = sql + orderBy.get(i);
+      if (isDesc.size() > i) {
+        if (isDesc.get(i)) {
+          sql = sql + " desc ";
+        }
+        sql = sql + ",";
+      }
+    }
+
+    if (!ifHasAid) {
+      sql = sql + "aid,";
+    }
+
+    //delete the last char
+    sql = sql.substring(0, sql.length() - 1);
+    //add limit
+    sql = sql + " LIMIT " + start + "," + offset + ";";
+    return jdbcTemplate.query(sql, new ActionRowMapper());
+  }
+
+  public List<ActionInfo> getAPageOfAction(long start, long offset) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    String sql = "SELECT * FROM " + TABLE_NAME + " LIMIT " + start + "," + offset + ";";
+    return jdbcTemplate.query(sql, new ActionRowMapper());
   }
 
   public List<ActionInfo> getLatestActions(String actionType, int size,
@@ -142,21 +189,26 @@ public class ActionDao {
     if (size != 0) {
       jdbcTemplate.setMaxRows(size);
     }
-    String sql = "select * from " + TABLE_NAME +
-        " where action_name = ? and finished = ? ORDER by aid DESC";
-    return jdbcTemplate
-        .query(sql, new ActionRowMapper(), actionType, finished);
+    String sql =
+        "SELECT * FROM " + TABLE_NAME + " WHERE action_name = ? AND finished = ? ORDER BY aid DESC";
+    return jdbcTemplate.query(sql, new ActionRowMapper(), actionType, finished);
   }
 
   public void delete(long aid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from " + TABLE_NAME + " where aid = ?";
+    final String sql = "DELETE FROM " + TABLE_NAME + " WHERE aid = ?";
     jdbcTemplate.update(sql, aid);
+  }
+
+  public void deleteCmdletActions(long cid) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    final String sql = "DELETE FROM " + TABLE_NAME + " WHERE cid = ?";
+    jdbcTemplate.update(sql, cid);
   }
 
   public void deleteAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "DELETE from " + TABLE_NAME;
+    final String sql = "DELETE FROM " + TABLE_NAME;
     jdbcTemplate.execute(sql);
   }
 
@@ -182,15 +234,18 @@ public class ActionDao {
 
   public int[] update(final ActionInfo[] actionInfos) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "update " + TABLE_NAME + " set " +
-        "result = ?, " +
-        "log = ?, " +
-        "successful = ?, " +
-        "create_time = ?, " +
-        "finished = ?, " +
-        "finish_time = ?, " +
-        "progress = ? " +
-        "where aid = ?";
+    String sql =
+        "UPDATE "
+            + TABLE_NAME
+            + " SET "
+            + "result = ?, "
+            + "log = ?, "
+            + "successful = ?, "
+            + "create_time = ?, "
+            + "finished = ?, "
+            + "finish_time = ?, "
+            + "progress = ? "
+            + "WHERE aid = ?";
     return jdbcTemplate.batchUpdate(sql,
         new BatchPreparedStatementSetter() {
           public void setValues(PreparedStatement ps,
@@ -214,7 +269,7 @@ public class ActionDao {
   public long getMaxId() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     Long ret = jdbcTemplate
-        .queryForObject("select MAX(aid) from " + TABLE_NAME, Long.class);
+        .queryForObject("SELECT MAX(aid) FROM " + TABLE_NAME, Long.class);
     if (ret == null) {
       return 0;
     } else {
@@ -235,7 +290,7 @@ public class ActionDao {
     parameters.put("create_time", actionInfo.getCreateTime());
     parameters.put("finished", actionInfo.isFinished());
     parameters.put("finish_time", actionInfo.getFinishTime());
-    parameters.put("progress", (int) (actionInfo.getProgress()));
+    parameters.put("progress", actionInfo.getProgress());
     return parameters;
   }
 
@@ -256,7 +311,7 @@ public class ActionDao {
       actionInfo.setCreateTime(resultSet.getLong("create_time"));
       actionInfo.setFinished(resultSet.getBoolean("finished"));
       actionInfo.setFinishTime(resultSet.getLong("finish_time"));
-      actionInfo.setProgress(resultSet.getInt("progress"));
+      actionInfo.setProgress(resultSet.getFloat("progress"));
       return actionInfo;
     }
   }

@@ -32,32 +32,39 @@ import akka.pattern.Patterns;
 import akka.util.Timeout;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.smartdata.AgentService;
-import org.smartdata.conf.SmartConfKeys;
-import org.smartdata.protocol.message.StatusReporter;
 import org.smartdata.conf.SmartConf;
+import org.smartdata.conf.SmartConfKeys;
+import org.smartdata.hdfs.HadoopUtil;
+import org.smartdata.protocol.message.StatusMessage;
+import org.smartdata.protocol.message.StatusReporter;
 import org.smartdata.server.engine.cmdlet.agent.AgentConstants;
+import org.smartdata.server.engine.cmdlet.agent.AgentUtils;
 import org.smartdata.server.engine.cmdlet.agent.SmartAgentContext;
+import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.AlreadyLaunchedTikv;
 import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.RegisterNewAgent;
+import org.smartdata.server.engine.cmdlet.agent.messages.AgentToMaster.ServeReady;
 import org.smartdata.server.engine.cmdlet.agent.messages.MasterToAgent;
 import org.smartdata.server.engine.cmdlet.agent.messages.MasterToAgent.AgentRegistered;
-import org.smartdata.server.engine.cmdlet.agent.AgentUtils;
-import org.smartdata.protocol.message.StatusMessage;
+import org.smartdata.server.engine.cmdlet.agent.messages.MasterToAgent.ReadyToLaunchTikv;
 import org.smartdata.server.utils.GenericOptionsParser;
-import scala.concurrent.duration.Duration;
-import scala.concurrent.duration.FiniteDuration;
+import org.smartdata.tidb.TikvServer;
+import org.smartdata.utils.SecurityUtil;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import scala.concurrent.duration.Duration;
+import scala.concurrent.duration.FiniteDuration;
 
 public class SmartAgent implements StatusReporter {
   private static final String NAME = "SmartAgent";
-  private final static Logger LOG = LoggerFactory.getLogger(SmartAgent.class);
+  private static final Logger LOG = LoggerFactory.getLogger(SmartAgent.class);
   private ActorSystem system;
   private ActorRef agentActor;
 
@@ -65,18 +72,50 @@ public class SmartAgent implements StatusReporter {
     SmartAgent agent = new SmartAgent();
 
     SmartConf conf = (SmartConf) new GenericOptionsParser(new SmartConf(), args).getConfiguration();
-    String[] masters = conf.getStrings(SmartConfKeys.SMART_AGENT_MASTER_ADDRESS_KEY);
+    String[] masters = AgentUtils.getMasterAddress(conf);
+    if (masters == null) {
+      throw new IOException("No master address found!");
+    }
+    for (int i = 0; i < masters.length; i++) {
+      LOG.info("Agent master " + i + ":  " + masters[i]);
+    }
+    String agentAddress = AgentUtils.getAgentAddress(conf);
+    LOG.info("Agent address: " + agentAddress);
 
-    checkNotNull(masters);
+    agent.authentication(conf);
 
     agent.start(AgentUtils.overrideRemoteAddress(ConfigFactory.load(AgentConstants.AKKA_CONF_FILE),
-        conf.get(SmartConfKeys.SMART_AGENT_ADDRESS_KEY)),
-        AgentUtils.getMasterActorPaths(masters), conf);
+        agentAddress), AgentUtils.getMasterActorPaths(masters), conf);
   }
+
+  private void authentication(SmartConf conf) throws IOException {
+    if (!SecurityUtil.isSecurityEnabled(conf)) {
+      return;
+    }
+
+    // Load Hadoop configuration files
+    String hadoopConfPath = conf.get(SmartConfKeys.SMART_HADOOP_CONF_DIR_KEY);
+    try {
+      HadoopUtil.loadHadoopConf(conf, hadoopConfPath);
+    } catch (IOException e) {
+      LOG.info("Running in secure mode, but cannot find Hadoop configuration file. "
+          + "Please config smart.hadoop.conf.path property in smart-site.xml.");
+      conf.set("hadoop.security.authentication", "kerberos");
+      conf.set("hadoop.security.authorization", "true");
+    }
+    UserGroupInformation.setConfiguration(conf);
+
+    String keytabFilename = conf.get(SmartConfKeys.SMART_AGENT_KEYTAB_FILE_KEY);
+    String principal = conf.get(SmartConfKeys.SMART_AGENT_KERBEROS_PRINCIPAL_KEY);
+
+    SecurityUtil.loginUsingKeytab(keytabFilename, principal);
+  }
+
 
   public void start(Config config, String[] masterPath, SmartConf conf) {
     system = ActorSystem.apply(NAME, config);
-    agentActor = system.actorOf(Props.create(AgentActor.class, this, masterPath), getAgentName());
+    agentActor = system.actorOf(
+            Props.create(AgentActor.class, this, masterPath, conf), getAgentName());
     final Thread currentThread = Thread.currentThread();
     Runtime.getRuntime().addShutdownHook(new Thread() {
       @Override
@@ -112,24 +151,42 @@ public class SmartAgent implements StatusReporter {
   }
 
   static class AgentActor extends UntypedActor {
-    private final static Logger LOG = LoggerFactory.getLogger(AgentActor.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AgentActor.class);
 
-    private final static FiniteDuration TIMEOUT = Duration.create(30, TimeUnit.SECONDS);
-    private final static FiniteDuration RETRY_INTERVAL = Duration.create(2, TimeUnit.SECONDS);
+    private static final FiniteDuration TIMEOUT = Duration.create(30, TimeUnit.SECONDS);
+    private static final FiniteDuration RETRY_INTERVAL = Duration.create(2, TimeUnit.SECONDS);
 
     private MasterToAgent.AgentId id;
     private ActorRef master;
     private final SmartAgent agent;
     private final String[] masters;
+    private SmartConf conf;
 
-    public AgentActor(SmartAgent agent, String[] masters) {
+    public AgentActor(SmartAgent agent, String[] masters, SmartConf conf) {
       this.agent = agent;
       this.masters = masters;
+      this.conf =  conf;
     }
 
     @Override
     public void onReceive(Object message) throws Exception {
       unhandled(message);
+    }
+
+    public boolean launchTikv(String masterHost) throws InterruptedException, IOException {
+      //TODO: configure in file
+      String agentAddress = AgentUtils.getAgentAddress(conf);
+      InetAddress address = InetAddress.getByName(new AgentUtils.HostPort(agentAddress).getHost());
+      String ip = address.getHostAddress();
+      String tikvArgs = String.format(
+              "--pd=%s:2379 --addr=%s:20160 --data-dir=tikv", masterHost, ip);
+      TikvServer tikvServer = new TikvServer(tikvArgs, conf);
+      Thread tikvThread = new Thread(tikvServer);
+      tikvThread.start();
+      while (!tikvServer.isReady()) {
+        Thread.sleep(100);
+      }
+      return true;
     }
 
     @Override
@@ -151,8 +208,6 @@ public class SmartAgent implements StatusReporter {
             }
           }, new Shutdown(agent));
     }
-
-
 
     private class WaitForFindMaster implements Procedure<Object> {
 
@@ -199,6 +254,7 @@ public class SmartAgent implements StatusReporter {
               AgentActor.this.id,
               AgentUtils.getFullPath(getContext().system(), getSelf().path()));
           getContext().become(new Serve());
+          master.tell(new ServeReady(), getSelf());
         }
       }
     }
@@ -216,6 +272,13 @@ public class SmartAgent implements StatusReporter {
         } else if (message instanceof StatusMessage) {
           master.tell(message, getSelf());
           getSender().tell("status reported", getSelf());
+        } else if (message instanceof ReadyToLaunchTikv) {
+          String masterHost = master.path().address().host().get();
+          boolean launched = launchTikv(masterHost);
+          if (launched) {
+            LOG.info("Tikv server is ready.");
+            master.tell(new AlreadyLaunchedTikv(id), getSelf());
+          }
         } else if (message instanceof Terminated) {
           Terminated terminated = (Terminated) message;
           if (terminated.getActor().equals(master)) {

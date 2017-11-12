@@ -19,14 +19,18 @@
 
 Usage="ssm --config <config dir> [--daemon] [--hosts <hostA> <hostB> --hostsend] [--daemon start|stop ] [--remote] <command> <command args>"
 
-#The tikv server will fail to start if http_proxy is set
+#The tikv server will fail to start or provide service if http_proxy and https_proxy are set
 unset http_proxy
+unset https_proxy
 
 SCRIPT_ARGS="$*"
 
 bin=$(dirname "${BASH_SOURCE-$0}")
 bin=$(cd "${bin}">/dev/null; pwd)
 HOSTNAME=$(hostname)
+if [ x"${SSM_EXEC_HOST}" = x"" ]; then
+  export SSM_EXEC_HOST=${HOSTNAME}
+fi
 
 REMOTE_COMMAND=
 DAEMON_MOD=
@@ -78,6 +82,7 @@ while [ $# != 0 ]; do
       ;;
   esac
 done
+SMART_HOSTS=${SMART_HOSTS/ /}
 
 REMOTE_COMMAND+=" $@"
 COMMAND=$1
@@ -136,6 +141,10 @@ if [ x"${REMOTE_MODE}" = x"true" ]; then
     fi
   done
 else
+  check_java_avaliable
+  if [ $? -ne 0 ]; then
+    exit 1
+  fi
   if [ x"${DAEMON_MOD}" = x"true" ]; then
     case "${DAEMON_MOD_OP}" in
       "start")

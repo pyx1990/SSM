@@ -23,14 +23,15 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.zeppelin.server.SmartZeppelinServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 import org.smartdata.SmartServiceState;
-import org.smartdata.utils.JaasLoginUtil;
 import org.smartdata.conf.SmartConf;
 import org.smartdata.conf.SmartConfKeys;
+import org.smartdata.hdfs.HadoopUtil;
 import org.smartdata.metastore.MetaStore;
 import org.smartdata.metastore.utils.MetaStoreUtils;
 import org.smartdata.server.engine.CmdletManager;
@@ -39,15 +40,18 @@ import org.smartdata.server.engine.RuleManager;
 import org.smartdata.server.engine.ServerContext;
 import org.smartdata.server.engine.ServiceMode;
 import org.smartdata.server.engine.StatesManager;
+import org.smartdata.server.engine.cmdlet.agent.AgentMaster;
 import org.smartdata.server.utils.GenericOptionsParser;
+import org.smartdata.tidb.LaunchDB;
+import org.smartdata.tidb.PdServer;
+import org.smartdata.tidb.TidbServer;
+import org.smartdata.utils.SecurityUtil;
 
-import javax.security.auth.Subject;
-
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
-
-import org.smartdata.tidb.Launch;
+import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * From this Smart Storage Management begins.
@@ -56,7 +60,7 @@ public class SmartServer {
   public static final Logger LOG = LoggerFactory.getLogger(SmartServer.class);
 
   private ConfManager confMgr;
-  private SmartConf conf;
+  private final SmartConf conf;
   private SmartEngine engine;
   private ServerContext context;
   private boolean enabled;
@@ -75,20 +79,18 @@ public class SmartServer {
     this.enabled = false;
   }
 
-  public void initWith(StartupOption startupOption) throws Exception {
-    checkSecurityAndLogin();
+  public void initWith() throws Exception {
+    LOG.info("Start Init Smart Server");
 
+    authentication();
     MetaStore metaStore = MetaStoreUtils.getDBAdapter(conf);
     context = new ServerContext(conf, metaStore);
     initServiceMode(conf);
-    if (startupOption == StartupOption.REGULAR) {
-      engine = new SmartEngine(context);
-      rpcServer = new SmartRpcServer(this, conf);
+    engine = new SmartEngine(context);
+    rpcServer = new SmartRpcServer(this, conf);
+    zeppelinServer = new SmartZeppelinServer(conf, engine);
 
-      if (isZeppelinEnabled()) {
-        zeppelinServer = new SmartZeppelinServer(conf, engine);
-      }
-    }
+    LOG.info("Finish Init Smart Server");
   }
 
   public StatesManager getStatesManager() {
@@ -116,40 +118,86 @@ public class SmartServer {
       args = new String[0];
     }
 
-    if (parseHelpArgument(args, USAGE, System.out, true)) {
-      return null;
+    StartupOption startOpt = StartupOption.REGULAR;
+    List<String> list = new ArrayList<>();
+    for (String arg : args) {
+      if (StartupOption.FORMAT.getName().equalsIgnoreCase(arg)) {
+        startOpt = StartupOption.FORMAT;
+      } else if (StartupOption.REGULAR.getName().equalsIgnoreCase(arg)) {
+        startOpt = StartupOption.REGULAR;
+      } else if (arg.equals("-h") || arg.equals("-help")) {
+        if (parseHelpArgument(new String[]{arg}, USAGE, System.out, true)) {
+          return null;
+        }
+      } else {
+        list.add(arg);
+      }
     }
-
-    GenericOptionsParser hParser = new GenericOptionsParser(conf, args);
-    args = hParser.getRemainingArgs();
-
-    StartupOption startOpt = parseArguments(args);
+    if (list != null) {
+      String remainArgs[] = list.toArray(new String[list.size()]);
+      new GenericOptionsParser(conf, remainArgs);
+    }
 
     return startOpt;
   }
 
-  static SmartServer processWith(StartupOption startOption, SmartConf conf) throws Exception {
-    if (isTidbEnabled(conf)) {
-      Thread db = new Thread(new Launch());
-      LOG.info("Starting PD, TiKV and TiDB..");
-      db.start();
-      try {
-        Thread.sleep(12000);
-      } catch (InterruptedException ex) {
-        LOG.error(ex.getMessage());
+  public static void startDB(SmartConf conf, AgentMaster agentMaster)
+          throws InterruptedException, IOException {
+    if (conf.getAgentsNumber() != 0) {
+      String host = conf.get(SmartConfKeys.SMART_AGENT_MASTER_ADDRESS_KEY);
+      InetAddress address = InetAddress.getByName(host);
+      String ip = address.getHostAddress();
+      String pdArgs = String.format(
+              "--client-urls=http://%s:2379 --peer-urls=http://%s:2380 --data-dir=pd", ip, ip);
+      PdServer pdServer = new PdServer(pdArgs, conf);
+      Thread pdThread = new Thread(pdServer);
+      pdThread.start();
+      while (!pdServer.isReady() || !agentMaster.isAgentRegisterReady(conf)) {
+        Thread.sleep(100);
       }
+      LOG.info("Pd server is ready.");
+      agentMaster.sendLaunchTikvMessage();
+      while (!agentMaster.isTikvAlreadyLaunched(conf)) {
+        Thread.sleep(100);
+      }
+      LOG.info("Tikv server is ready.");
+      String tidbArgs = String.format("--store=tikv --path=%s:2379 --lease=10s", host);
+      TidbServer tidbServer = new TidbServer(tidbArgs, conf);
+      Thread tidbThread = new Thread(tidbServer);
+      tidbThread.start();
+      while (!tidbServer.isReady()) {
+        Thread.sleep(100);
+      }
+      LOG.info("Tidb server is ready.");
+    } else {
+      LaunchDB launchDB = new LaunchDB(conf);
+      Thread db = new Thread(launchDB);
+      LOG.info("Starting Pd, Tikv and Tidb..");
+      db.start();
+      while (!launchDB.isCompleted()) {
+        Thread.sleep(100);
+      }
+    }
+  }
+
+  static SmartServer processWith(StartupOption startOption, SmartConf conf) throws Exception {
+    AgentMaster agentMaster = AgentMaster.getAgentMaster(conf);
+
+    if (isTidbEnabled(conf)) {
+      startDB(conf, agentMaster);
     }
 
     if (startOption == StartupOption.FORMAT) {
       LOG.info("Formatting DataBase ...");
       MetaStoreUtils.formatDatabase(conf);
       LOG.info("Formatting DataBase finished successfully!");
-      return null;
+    } else {
+      MetaStoreUtils.checkTables(conf);
     }
 
     SmartServer ssm = new SmartServer(conf);
     try {
-      ssm.initWith(startOption);
+      ssm.initWith();
       ssm.run();
       return ssm;
     } catch (Exception e){
@@ -161,6 +209,7 @@ public class SmartServer {
   private static final String USAGE =
       "Usage: ssm [options]\n"
           + "  -h\n\tShow this usage information.\n\n"
+          + "  -format\n\tFormat the configured database.\n\n"
           + "  -D property=value\n"
           + "\tSpecify or overwrite an configure option.\n"
           + "\tE.g. -D smart.dfs.namenode.rpcserver=hdfs://localhost:43543\n";
@@ -175,7 +224,6 @@ public class SmartServer {
 
   private static boolean parseHelpArgument(String[] args,
       String helpDescription, PrintStream out, boolean printGenericCmdletUsage) {
-    if (args.length == 1) {
       try {
         CommandLineParser parser = new PosixParser();
         CommandLine cmdLine = parser.parse(helpOptions, args);
@@ -189,41 +237,35 @@ public class SmartServer {
         //LOG.warn("Parse help exception", pe);
         return false;
       }
-    }
     return false;
   }
 
-  private boolean isSecurityEnabled() {
-    return conf.getBoolean(SmartConfKeys.SMART_SECURITY_ENABLE, false);
-  }
-
-  private boolean isZeppelinEnabled() {
-    return conf.getBoolean(SmartConfKeys.SMART_ENABLE_ZEPPELIN,
-        SmartConfKeys.SMART_ENABLE_ZEPPELIN_DEFAULT);
-  }
-
   private static boolean isTidbEnabled(SmartConf conf) {
-    return conf.getBoolean(SmartConfKeys.SMART_TIDB_ENABLED,SmartConfKeys.SMART_TIDB_ENABLED_DEFAULT);
+    return conf.getBoolean(
+        SmartConfKeys.SMART_TIDB_ENABLED, SmartConfKeys.SMART_TIDB_ENABLED_DEFAULT);
   }
 
-  private void checkSecurityAndLogin() throws IOException {
-    if (!isSecurityEnabled()) {
+  private void authentication() throws IOException {
+    if (!SecurityUtil.isSecurityEnabled(conf)) {
       return;
     }
-    String keytabFilename = conf.get(SmartConfKeys.SMART_SERVER_KEYTAB_FILE_KEY);
-    if (keytabFilename == null || keytabFilename.length() == 0) {
-      throw new IOException("Running in secure mode, but config doesn't have a keytab");
-    }
-    File keytabPath = new File(keytabFilename);
-    String principal = conf.get(SmartConfKeys.SMART_SERVER_KERBEROS_PRINCIPAL_KEY);
-    Subject subject = null;
+    // Load Hadoop configuration files
+    String hadoopConfPath = conf.get(SmartConfKeys.SMART_HADOOP_CONF_DIR_KEY);
     try {
-      subject = JaasLoginUtil.loginUsingKeytab(principal, keytabPath);
+      HadoopUtil.loadHadoopConf(conf, hadoopConfPath);
     } catch (IOException e) {
-      LOG.error("Fail to login using keytab. " + e);
+        LOG.info("Running in secure mode, but cannot find Hadoop configuration file. "
+            + "Please config smart.hadoop.conf.path property in smart-site.xml.");
+        conf.set("hadoop.security.authentication", "kerberos");
+        conf.set("hadoop.security.authorization", "true");
     }
-    LOG.info("Login successful for user: "
-        + subject.getPrincipals().iterator().next());
+
+    UserGroupInformation.setConfiguration(conf);
+
+    String keytabFilename = conf.get(SmartConfKeys.SMART_SERVER_KEYTAB_FILE_KEY);
+    String principal = conf.get(SmartConfKeys.SMART_SERVER_KERBEROS_PRINCIPAL_KEY);
+
+    SecurityUtil.loginUsingKeytab(keytabFilename, principal);
   }
 
   /**
@@ -323,26 +365,16 @@ public class SmartServer {
     try {
       context.setServiceMode(ServiceMode.valueOf(serviceModeStr.trim().toUpperCase()));
     } catch (IllegalStateException e) {
-      String errorMsg = "Illegal service mode '" + serviceModeStr + "' set in property: "+
-          SmartConfKeys.SMART_SERVICE_MODE_KEY + "!";
+      String errorMsg =
+          "Illegal service mode '"
+              + serviceModeStr
+              + "' set in property: "
+              + SmartConfKeys.SMART_SERVICE_MODE_KEY
+              + "!";
       LOG.error(errorMsg);
       throw e;
     }
-    LOG.info("Initialized service mode: "+ context.getServiceMode().getName() + ".");
-  }
-
-  private static StartupOption parseArguments(String args[]) {
-    int argsLen = (args == null) ? 0 : args.length;
-    StartupOption startOpt = StartupOption.REGULAR;
-    for(int i=0; i < argsLen; i++) {
-      String cmd = args[i];
-      if (StartupOption.FORMAT.getName().equalsIgnoreCase(cmd)) {
-        startOpt = StartupOption.FORMAT;
-      } else if (StartupOption.REGULAR.getName().equalsIgnoreCase(cmd)) {
-        startOpt = StartupOption.REGULAR;
-      }
-    }
-    return startOpt;
+    LOG.info("Initialized service mode: " + context.getServiceMode().getName() + ".");
   }
 
   public static SmartServer launchWith(SmartConf conf) throws Exception {

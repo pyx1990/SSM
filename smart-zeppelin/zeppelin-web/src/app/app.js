@@ -15,10 +15,6 @@
  * limitations under the License.
  */
 // rootPath of this site, it has a tailing slash /
-var rootPath = function () {
-  var root = location.origin + location.pathname;
-  return root.substring(0, root.lastIndexOf("/") + 1);
-}();
 var zeppelinWebApp = angular.module('zeppelinWebApp', [
   'ngCookies',
   'ngAnimate',
@@ -75,8 +71,9 @@ var zeppelinWebApp = angular.module('zeppelinWebApp', [
     };
 
     $routeProvider
-      .when("/",{
-        redirectTo: '/notebook/2CM9DW8NW'
+      .when('/', {
+        templateUrl: 'components/login/login.html',
+        controller: 'LoginCtrl'
       })
       .when('/notebook/:noteId', {
         templateUrl: 'app/notebook/notebook.html',
@@ -124,6 +121,9 @@ var zeppelinWebApp = angular.module('zeppelinWebApp', [
           }]
         }
       })
+      .when('/rule/grammar', {
+        templateUrl: 'app/dashboard/views/rules/submit/help.html'
+      })
       .when('/rules/rule/:ruleId', {
         templateUrl: 'app/dashboard/views/rules/rule/rule.html',
         controller: 'RuleCtrl',
@@ -153,17 +153,12 @@ var zeppelinWebApp = angular.module('zeppelinWebApp', [
       })
       .when('/actions', {
         templateUrl: 'app/dashboard/views/actions/actions.html',
-        controller: 'ActionsCtrl',
-        resolve: {
-          actions0: ['models', function (models) {
-            return models.$get.actions();
-          }],
-          actionTypes: ['models', function (models) {
-            return models.$get.actionTypes();
-          }]
-        }
+        controller: 'ActionsCtrl'
       })
-      .when('/copys', {
+      .when('/action/usage', {
+        templateUrl: 'app/dashboard/views/actions/submit/help.html'
+      })
+      .when('/syncs', {
         templateUrl: 'app/dashboard/views/copy/copy.html',
         controller: 'CopyCtrl',
         resolve: {
@@ -174,19 +169,14 @@ var zeppelinWebApp = angular.module('zeppelinWebApp', [
       })
       .when('/copys/copy/:ruleId', {
         templateUrl: 'app/dashboard/views/copy/detail/copyActions.html',
-        controller: 'CopyActionsCtrl',
-        resolve: {
-          copyActions0: ['$route', 'models', function ($route, models) {
-            return models.$get.copyActions($route.current.params.ruleId);
-          }]
-        }
+        controller: 'CopyActionsCtrl'
       })
       .when('/actions/action/:actionId', {
         templateUrl: 'app/dashboard/views/actions/action/action.html',
         controller: 'ActionCtrl',
         resolve: {
           action0: ['$route', 'models', function ($route, models) {
-            return models.$get.action($route.current.params.actionId);
+            return models.$get.actionInfo($route.current.params.actionId);
           }]
         }
       })
@@ -219,8 +209,26 @@ var zeppelinWebApp = angular.module('zeppelinWebApp', [
         templateUrl: 'app/search/result-list.html',
         controller: 'SearchResultCtrl'
       })
+      .when('/storage', {
+        templateUrl: 'app/dashboard/views/cluster/storage/storage.html',
+        controller: 'StorageCtrl',
+        resolve: {
+          cache: ['models', function (models) {
+            return models.$get.storageUsage('cache');
+          }],
+          ssd: ['models', function (models) {
+            return models.$get.storageUsage('ssd');
+          }],
+          disk: ['models', function (models) {
+            return models.$get.storageUsage('disk');
+          }],
+          archive: ['models', function (models) {
+            return models.$get.storageUsage('archive');
+          }]
+        }
+      })
       .otherwise({
-        redirectTo: '/'
+        redirectTo: '/notebook/2CM9DW8NW'
       });
 
     ngToastProvider.configure({
@@ -274,13 +282,9 @@ var zeppelinWebApp = angular.module('zeppelinWebApp', [
   // constants
   .constant('conf', {
     restapiProtocol: 'v1',
-    // restapiRoot: 'http://localhost:7045/',
-    restapiRoot: rootPath,
     restapiQueryInterval: 3 * 1000, // in milliseconds
     restapiQueryTimeout: 30 * 1000, // in milliseconds
-    restapiTaskLevelMetricsQueryLimit: 100,
-    // loginUrl: 'http://localhost:7045/' + 'login'
-    loginUrl: rootPath + 'login'
+    restapiTaskLevelMetricsQueryLimit: 100
   })
   .constant('TRASH_FOLDER_ID', '~Trash');
 

@@ -50,20 +50,26 @@
   </property>
 
   <property>
-    <name>smart.agent.address</name>
-    <value>127.0.0.1:7048</value>
-    <description>SmartAgent address</description>
+    <name>smart.agent.port</name>
+    <value>7048</value>
+    <description>SmartAgent port</description>
   </property>
 
   <property>
-    <name>smart.agent.master.address</name>
-    <value>127.0.0.1:7051</value>
-    <description>SmartAgent master address</description>
+    <name>smart.agent.master.port</name>
+    <value>7051</value>
+    <description>SmartAgent master port</description>
   </property>
 
   <property>
     <name>smart.rule.executors</name>
     <value>5</value>
     <description>Max number of rules that can be executed in parallel</description>
+  </property>
+
+  <property>
+    <name>smart.action.local.execution.disabled</name>
+    <value>false</value>
+    <description>Actions will not be executed on SSM server if true.</description>
   </property>
 </configuration>

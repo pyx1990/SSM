@@ -23,17 +23,17 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 
 import javax.sql.DataSource;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-
 public class DataNodeStorageInfoDao {
   private DataSource dataSource;
 
-  private final String TABLE_NAME = "datanode_storage_info";
+  private static final String TABLE_NAME = "datanode_storage_info";
 
   public void setDataSource(DataSource dataSource) {
     this.dataSource = dataSource;
@@ -54,6 +54,12 @@ public class DataNodeStorageInfoDao {
     return jdbcTemplate.query(
         "SELECT * FROM " + TABLE_NAME + " WHERE uuid = ?",
         new Object[]{uuid}, new DataNodeStorageInfoRowMapper());
+  }
+
+  public List<DataNodeStorageInfo> getBySid(int sid) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    return jdbcTemplate.query("SELECT * FROM " + TABLE_NAME + " WHERE sid = ?",
+        new Object[]{sid}, new DataNodeStorageInfoRowMapper());
   }
 
   public void insert(DataNodeStorageInfo dataNodeStorageInfoInfo) {

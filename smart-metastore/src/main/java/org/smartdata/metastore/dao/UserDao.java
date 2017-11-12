@@ -21,6 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import javax.sql.DataSource;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -48,14 +49,14 @@ public class UserDao {
   public synchronized void deleteUser(String user) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     String sql = String.format(
-        "DELETE FROM owner where owner_name = '%s'", user);
+        "DELETE FROM owner WHERE owner_name = '%s'", user);
     jdbcTemplate.execute(sql);
   }
 
   public List<String> listUser() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     List<String> user = jdbcTemplate.query(
-        "select owner_name from owner",
+        "SELECT owner_name FROM owner",
         new RowMapper<String>() {
           public String mapRow(ResultSet rs, int rowNum) throws SQLException {
             return rs.getString("owner_name");

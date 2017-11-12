@@ -117,7 +117,7 @@ public abstract class SmartAction {
 
   protected abstract void execute() throws Exception;
 
-  final public void run() {
+  public final void run() {
     Throwable throwable = null;
     try {
       reportStart();
@@ -163,6 +163,14 @@ public abstract class SmartAction {
 
   protected void appendLog(String log) {
     psLogOs.println(log);
+  }
+
+  public PrintStream getResultOs() {
+    return psResultOs;
+  }
+
+  public PrintStream getLogOs() {
+    return psLogOs;
   }
 
   public float getProgress() {

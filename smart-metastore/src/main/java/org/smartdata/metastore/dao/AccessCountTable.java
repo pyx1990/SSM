@@ -83,9 +83,19 @@ public class AccessCountTable {
       return false;
     }
     AccessCountTable other = (AccessCountTable) o;
-    return other.getStartTime().equals(this.startTime) &&
-        other.getEndTime().equals(this.endTime) &&
-        other.getGranularity().equals(this.granularity);
+    return other.getStartTime().equals(this.startTime)
+        && other.getEndTime().equals(this.endTime)
+        && other.getGranularity().equals(this.granularity);
+  }
+
+  @Override
+  public int hashCode() {
+    int result = tableName.hashCode();
+    result = 31 * result + startTime.hashCode();
+    result = 31 * result + endTime.hashCode();
+    result = 31 * result + granularity.hashCode();
+    result = 31 * result + (isEphemeral ? 1 : 0);
+    return result;
   }
 
   @Override

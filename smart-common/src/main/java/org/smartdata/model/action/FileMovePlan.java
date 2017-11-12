@@ -36,6 +36,11 @@ public class FileMovePlan {
 
   // info of the file
   private String fileName;
+  private boolean isDir;
+  private long fileLength;
+  private long fileLengthToMove; // length to move in file level
+  private long sizeToMove;  // total bytes to move
+  private int blocksToMove; // number of file blocks
 
   // info of source datanode
   private List<String> sourceUuids;
@@ -147,5 +152,49 @@ public class FileMovePlan {
   public static FileMovePlan fromJsonString(String jsonPlan) {
     Gson gson = new Gson();
     return gson.fromJson(jsonPlan, FileMovePlan.class);
+  }
+
+  public long getFileLength() {
+    return fileLength;
+  }
+
+  public void setFileLength(long fileLength) {
+    this.fileLength = fileLength;
+  }
+
+  public long getSizeToMove() {
+    return sizeToMove;
+  }
+
+  public void setSizeToMove(long sizeToMove) {
+    this.sizeToMove = sizeToMove;
+  }
+
+  public void addSizeToMove(long size) {
+    this.sizeToMove += size;
+  }
+
+  public int getBlocksToMove() {
+    return blocksToMove;
+  }
+
+  public void incBlocksToMove() {
+    this.blocksToMove += 1;
+  }
+
+  public long getFileLengthToMove() {
+    return fileLengthToMove;
+  }
+
+  public void addFileLengthToMove(long fileLengthToMove) {
+    this.fileLengthToMove += fileLengthToMove;
+  }
+
+  public boolean isDir() {
+    return isDir;
+  }
+
+  public void setDir(boolean dir) {
+    isDir = dir;
   }
 }

@@ -23,6 +23,7 @@ import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
 
 import javax.sql.DataSource;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -32,8 +33,8 @@ import java.util.Map;
 
 public class AccessCountDao {
   private DataSource dataSource;
-  final static String FILE_FIELD = "fid";
-  final static String ACCESSCOUNT_FIELD = "count";
+  static final String FILE_FIELD = "fid";
+  static final String ACCESSCOUNT_FIELD = "count";
 
   public void setDataSource(DataSource dataSource) {
     this.dataSource = dataSource;
@@ -59,7 +60,7 @@ public class AccessCountDao {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     final String sql =
         String.format(
-        "delete from access_count_table where start_time >= %s AND end_time <= %s",
+        "DELETE FROM access_count_table WHERE start_time >= %s AND end_time <= %s",
             startTime,
             endTime);
     jdbcTemplate.update(sql);
@@ -67,7 +68,7 @@ public class AccessCountDao {
 
   public void delete(AccessCountTable table) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from access_count_table where table_name = ?";
+    final String sql = "DELETE FROM access_count_table WHERE table_name = ?";
     jdbcTemplate.update(sql, table.getTableName());
   }
 
@@ -105,7 +106,8 @@ public class AccessCountDao {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     String statement =
         String.format(
-            "SELECT %s, SUM(%s) as %s FROM (%s) tmp WHERE %s IN (SELECT fid from file) GROUP BY %s ORDER BY %s DESC LIMIT %s",
+            "SELECT %s, SUM(%s) AS %s FROM (%s) tmp WHERE %s IN (SELECT fid FROM file) "
+                + "GROUP BY %s ORDER BY %s DESC LIMIT %s",
             AccessCountDao.FILE_FIELD,
             AccessCountDao.ACCESSCOUNT_FIELD,
             AccessCountDao.ACCESSCOUNT_FIELD,

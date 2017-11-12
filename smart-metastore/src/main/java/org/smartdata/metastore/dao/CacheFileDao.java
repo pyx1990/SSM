@@ -18,22 +18,20 @@
 package org.smartdata.metastore.dao;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.smartdata.model.CachedFileStatus;
 import org.smartdata.metrics.FileAccessEvent;
+import org.smartdata.model.CachedFileStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.core.namedparam.SqlParameterSource;
-import org.springframework.jdbc.core.namedparam.SqlParameterSourceUtils;
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert;
 
 import javax.sql.DataSource;
+
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 
 public class CacheFileDao {
 
@@ -49,13 +47,13 @@ public class CacheFileDao {
 
   public List<CachedFileStatus> getAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.query("select * from cached_file",
+    return jdbcTemplate.query("SELECT * FROM cached_file",
         new CacheFileRowMapper());
   }
 
   public CachedFileStatus getById(long fid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    return jdbcTemplate.queryForObject("select * from cached_file where fid = ?",
+    return jdbcTemplate.queryForObject("SELECT * FROM cached_file WHERE fid = ?",
         new Object[]{fid}, new CacheFileRowMapper());
   }
 
@@ -96,11 +94,9 @@ public class CacheFileDao {
     simpleJdbcInsert.executeBatch(maps);
   }
 
-  public int update(Long fid, Long lastAccessTime,
-                    Integer numAccessed) {
+  public int update(Long fid, Long lastAccessTime, Integer numAccessed) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "update cached_file set last_access_time = ?, "  +
-                     "accessed_num = ? where fid = ?";
+    String sql = "UPDATE cached_file SET last_access_time = ?, accessed_num = ? WHERE fid = ?";
     return jdbcTemplate.update(sql, lastAccessTime, numAccessed, fid);
   }
 
@@ -138,13 +134,13 @@ public class CacheFileDao {
 
   public void deleteById(long fid) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    final String sql = "delete from cached_file where fid = ?";
+    final String sql = "DELETE FROM cached_file WHERE fid = ?";
     jdbcTemplate.update(sql, fid);
   }
 
   public void deleteAll() {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-    String sql = "DELETE from cached_file";
+    String sql = "DELETE FROM cached_file";
     jdbcTemplate.execute(sql);
   }
 

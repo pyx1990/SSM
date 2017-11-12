@@ -23,8 +23,8 @@ import org.apache.commons.lang.StringUtils;
 import org.smartdata.agent.SmartAgent;
 import org.smartdata.integration.rest.RestApiBase;
 import org.smartdata.server.SmartDaemon;
-import scala.reflect.io.File;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -60,7 +60,8 @@ public class Util {
     retryUntil(retryTask, maxRetries, 1000);
   }
 
-  public static void retryUntil(RetryTask retryTask, int maxRetries, long interval) throws InterruptedException {
+  public static void retryUntil(RetryTask retryTask, int maxRetries, long interval)
+      throws InterruptedException {
     boolean met = false;
     int retries = 0;
 
@@ -99,7 +100,7 @@ public class Util {
     commands.add(java);
     commands.addAll(Arrays.asList(options));
     commands.add("-cp");
-    commands.add(StringUtils.join(classPath, File.pathSeparator()));
+    commands.add(StringUtils.join(classPath, File.pathSeparator));
     commands.add(mainClass);
     commands.addAll(Arrays.asList(arguments));
     return new ProcessBuilder(commands).start();
@@ -109,7 +110,8 @@ public class Util {
     return buildProcess(new String[0], mainClass, arguments);
   }
 
-  public static Process buildProcess(String[] classPath, String mainClass, String[] arguments) throws IOException {
+  public static Process buildProcess(String[] classPath, String mainClass, String[] arguments)
+      throws IOException {
     return buildProcess(new String[0], classPath, mainClass, arguments);
   }
 }

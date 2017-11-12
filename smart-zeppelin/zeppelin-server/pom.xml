@@ -22,14 +22,14 @@
   <parent>
     <artifactId>smart-zeppelin</artifactId>
     <groupId>org.smartdata</groupId>
-    <version>1.2-SNAPSHOT</version>
+    <version>1.3.1-SNAPSHOT</version>
     <relativePath>..</relativePath>
   </parent>
 
   <groupId>org.smartdata</groupId>
   <artifactId>smart-zeppelin-server</artifactId>
   <packaging>jar</packaging>
-  <version>1.2-SNAPSHOT</version>
+  <version>1.3.1-SNAPSHOT</version>
   <name>Zeppelin: Server</name>
 
   <properties>
@@ -37,8 +37,8 @@
     <cxf.version>2.7.8</cxf.version>
     <quartz.scheduler.version>2.2.1</quartz.scheduler.version>
     <jersey.servlet.version>1.13</jersey.servlet.version>
-    <javax.ws.rsapi.version>2.0-m10</javax.ws.rsapi.version>
     <libpam4j.version>1.8</libpam4j.version>
+    <javax.ws.rsapi.version>2.0-m10</javax.ws.rsapi.version>
     <jna.version>4.1.0</jna.version>
 
     <!--test library versions-->
@@ -59,23 +59,6 @@
         <version>${scala.version}</version>
       </dependency>
 
-      <dependency>
-        <groupId>org.scala-lang</groupId>
-        <artifactId>scala-compiler</artifactId>
-        <version>${scala.version}</version>
-      </dependency>
-
-      <dependency>
-        <groupId>org.scala-lang</groupId>
-        <artifactId>scala-reflect</artifactId>
-        <version>${scala.version}</version>
-      </dependency>
-
-      <dependency>
-        <groupId>org.scala-lang</groupId>
-        <artifactId>scalap</artifactId>
-        <version>${scala.version}</version>
-      </dependency>
     </dependencies>
   </dependencyManagement>
 
@@ -83,7 +66,7 @@
     <dependency>
       <groupId>org.smartdata</groupId>
       <artifactId>smart-interpreter</artifactId>
-      <version>1.2-SNAPSHOT</version>
+      <version>1.3.1-SNAPSHOT</version>
     </dependency>
 
     <dependency>
@@ -130,12 +113,6 @@
     </dependency>
 
     <dependency>
-      <groupId>net.java.dev.jna</groupId>
-      <artifactId>jna</artifactId>
-      <version>${jna.version}</version>
-    </dependency>
-
-    <dependency>
       <groupId>org.apache.cxf</groupId>
       <artifactId>cxf-rt-frontend-jaxrs</artifactId>
       <version>${cxf.version}</version>
@@ -174,27 +151,17 @@
     </dependency>
 
     <dependency>
-      <groupId>org.apache.cxf</groupId>
-      <artifactId>cxf-api</artifactId>
-      <version>${cxf.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.eclipse.jetty</groupId>
-          <artifactId>*</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-
-    <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-webapp</artifactId>
       <version>${jetty.version}</version>
     </dependency>
+
     <dependency>
       <groupId>org.eclipse.jetty.websocket</groupId>
       <artifactId>websocket-server</artifactId>
       <version>${jetty.version}</version>
     </dependency>
+
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
@@ -204,6 +171,12 @@
       <groupId>org.quartz-scheduler</groupId>
       <artifactId>quartz</artifactId>
       <version>${quartz.scheduler.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>c3p0</groupId>
+          <artifactId>c3p0</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
@@ -221,18 +194,6 @@
     <dependency>
       <groupId>org.scala-lang</groupId>
       <artifactId>scala-library</artifactId>
-      <version>${scala.version}</version>
-    </dependency>
-
-    <dependency>
-      <groupId>org.scala-lang</groupId>
-      <artifactId>scala-compiler</artifactId>
-      <version>${scala.version}</version>
-    </dependency>
-
-    <dependency>
-      <groupId>org.scala-lang</groupId>
-      <artifactId>scala-reflect</artifactId>
       <version>${scala.version}</version>
     </dependency>
 
